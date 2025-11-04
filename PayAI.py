@@ -82,7 +82,7 @@ MODOS = {
 }
 modo_atual = MODOS['AUTO']
 
-# Paleta de cores moderna
+# Paleta de cores moderna sem emojis
 CORES = {
     'PRIMARIA': (0, 180, 255),      # Laranja moderno
     'SECUNDARIA': (255, 100, 0),    # Azul elétrico
@@ -279,7 +279,7 @@ def criar_card_arredondado(frame, x1, y1, x2, y2, cor, alpha=0.9):
     cv2.rectangle(frame, (x1, y1), (x2, y2), cor, 1)
 
 def desenhar_interface_moderna(frame):
-    """Desenha interface moderna e elegante"""
+    """Desenha interface moderna e elegante sem emojis"""
     altura = frame.shape[0]
     largura = frame.shape[1]
     
@@ -290,14 +290,14 @@ def desenhar_interface_moderna(frame):
         cv2.line(frame, (0, i), (largura, i), cor, 1)
     
     # Logo/Título
-    desenhar_texto_estilizado(frame, "🤖 PayAI", (20, 35), CORES['PRIMARIA'], 1.1, 2)
-    desenhar_texto_estilizado(frame, "Sistema Inteligente", (200, 35), CORES['TEXTO'], 0.6, 1)
+    desenhar_texto_estilizado(frame, "PAY AI", (20, 35), CORES['PRIMARIA'], 1.1, 2)
+    desenhar_texto_estilizado(frame, "Sistema Inteligente", (150, 35), CORES['TEXTO'], 0.6, 1)
     
     # Card do modo atual
-    modos_texto = ["🔄 AUTO", "💰 VALORES", "🔷 QR CODE"]
+    modos_texto = ["AUTO", "VALORES", "QR CODE"]
     modo_texto = modos_texto[modo_atual]
     criar_card_arredondado(frame, largura - 180, 15, largura - 10, 45, CORES['CARDBG'])
-    desenhar_texto_estilizado(frame, f"Modo: {modo_texto}", (largura - 170, 35), CORES['ALERTA'], 0.6, 1)
+    desenhar_texto_estilizado(frame, f"MODO: {modo_texto}", (largura - 170, 35), CORES['ALERTA'], 0.6, 1)
     
     # Footer
     footer_y = altura - 70
@@ -305,10 +305,10 @@ def desenhar_interface_moderna(frame):
     
     # Instruções em cards individuais
     instrucoes = [
-        ("ESC", "Sair"),
-        ("V", "Valores"), 
-        ("Q", "QR Code"),
-        ("A", "Automático")
+        ("ESC", "SAIR"),
+        ("V", "VALORES"), 
+        ("Q", "QR CODE"),
+        ("A", "AUTO")
     ]
     
     card_largura = 120
@@ -358,7 +358,7 @@ def processar_valores(frame):
                     
                     contornos_ativos.append((
                         (top_left, bottom_right), 
-                        f"💰 {valor_monetario}", 
+                        f"VALOR: {valor_monetario}", 
                         time.time(),
                         'VALOR'
                     ))
@@ -386,13 +386,13 @@ def processar_qrcode(frame):
                 texto_qr = data[:15] + "..." if len(data) > 15 else data
                 contornos_ativos.append((
                     (top_left, bottom_right), 
-                    f"🔷 QR: {texto_qr}", 
+                    f"QR: {texto_qr}", 
                     time.time(),
                     'QRCODE'
                 ))
 
 print("[INFO] Aponte a câmera para o visor da maquininha ou QR Code...")
-logger.info("Sistema PayAI iniciado - Interface Moderna")
+logger.info("Sistema PayAI iniciado - Interface Moderna Sem Emojis")
 
 try:
     while True:
