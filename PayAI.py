@@ -6,6 +6,7 @@ import re
 import logging
 import threading
 from collections import deque
+import numpy as np
 
 # Configuração de logging
 logging.basicConfig(
@@ -63,7 +64,7 @@ ultimo_processamento = 0
 
 # Para manter os contornos na tela
 contornos_ativos = []
-CONTORNO_TEMPO_VIDA = 2.0
+CONTORNO_TEMPO_VIDA = 3.0
 
 # Configurações de performance
 OCR_INTERVAL = 0.3
@@ -72,6 +73,23 @@ RESIZE_OCR = (320, 240)
 
 # Thread-safe para fala
 fala_lock = threading.Lock()
+
+# Sistema de modos
+MODOS = {
+    'AUTO': 0,      # Detecta automaticamente QR Code e Valores
+    'VALORES': 1,   # Foca apenas em valores monetários
+    'QRCODE': 2     # Foca apenas em QR Codes
+}
+modo_atual = MODOS['AUTO']
+
+# Cores e estilo
+CORES = {
+    'VALOR': (0, 255, 0),       # Verde para valores
+    'QRCODE': (255, 0, 255),    # Magenta para QR Codes
+    'MODO': (0, 255, 255),      # Amarelo para informações de modo
+    'BACKGROUND': (0, 0, 0),    # Preto para fundo
+    'TEXTO': (255, 255, 255)    # Branco para texto
+}
 
 def converter_numero_para_portugues(numero):
     """Converte números para palavras em português de forma natural"""
@@ -241,11 +259,117 @@ def atualizar_contornos_ativos():
     """Remove contornos antigos"""
     global contornos_ativos
     agora = time.time()
-    contornos_ativos = [(bbox, texto, ts) for bbox, texto, ts in contornos_ativos 
+    contornos_ativos = [(bbox, texto, ts, tipo) for bbox, texto, ts, tipo in contornos_ativos 
                        if (agora - ts) < CONTORNO_TEMPO_VIDA]
 
+def desenhar_texto_bonito(frame, texto, posicao, cor, tamanho=0.7, espessura=2):
+    """Desenha texto com sombra para melhor legibilidade"""
+    x, y = posicao
+    
+    # Sombra
+    cv2.putText(frame, texto, (x+2, y+2), 
+                cv2.FONT_HERSHEY_SIMPLEX, tamanho, CORES['BACKGROUND'], espessura+1)
+    
+    # Texto principal
+    cv2.putText(frame, texto, (x, y), 
+                cv2.FONT_HERSHEY_SIMPLEX, tamanho, cor, espessura)
+
+def desenhar_interface(frame):
+    """Desenha a interface do usuário"""
+    altura = frame.shape[0]
+    largura = frame.shape[1]
+    
+    # Barra superior
+    cv2.rectangle(frame, (0, 0), (largura, 40), CORES['BACKGROUND'], -1)
+    
+    # Título
+    desenhar_texto_bonito(frame, "PayAI - Sistema de Reconhecimento", (10, 30), CORES['TEXTO'], 0.8, 1)
+    
+    # Modo atual
+    modos_texto = ["AUTO", "VALORES", "QR CODE"]
+    modo_texto = modos_texto[modo_atual]
+    desenhar_texto_bonito(frame, f"Modo: {modo_texto}", (largura - 200, 30), CORES['MODO'], 0.7, 1)
+    
+    # Barra inferior com instruções
+    cv2.rectangle(frame, (0, altura-60), (largura, altura), CORES['BACKGROUND'], -1)
+    
+    instrucoes = [
+        "ESC: Sair",
+        "V: Modo Valores", 
+        "Q: Modo QR Code",
+        "A: Modo Automático"
+    ]
+    
+    for i, instrucao in enumerate(instrucoes):
+        desenhar_texto_bonito(frame, instrucao, (10 + i*150, altura-20), CORES['TEXTO'], 0.5, 1)
+
+def processar_valores(frame):
+    """Processa valores monetários"""
+    try:
+        small_frame = cv2.resize(frame, RESIZE_OCR)
+        gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+        
+        results = reader.readtext(
+            gray, 
+            detail=1, 
+            paragraph=False, 
+            batch_size=1,
+            width_ths=2.0,
+            height_ths=2.0
+        )
+        
+        for (bbox, texto, conf) in results:
+            if conf > 0.7:
+                valor_monetario = filtrar_valor_monetario(texto)
+                
+                if valor_monetario and evitar_repeticao(valor_monetario):
+                    logger.info(f"Valor detectado: {valor_monetario} (confiança: {conf:.2f})")
+                    falar_texto(valor_monetario)
+                    
+                    # Ajusta coordenadas para frame original
+                    scale_x = 640 / RESIZE_OCR[0]
+                    scale_y = 480 / RESIZE_OCR[1]
+                    top_left = (int(bbox[0][0] * scale_x), int(bbox[0][1] * scale_y))
+                    bottom_right = (int(bbox[2][0] * scale_x), int(bbox[2][1] * scale_y))
+                    
+                    # Adiciona à lista de contornos ativos
+                    contornos_ativos.append((
+                        (top_left, bottom_right), 
+                        valor_monetario, 
+                        time.time(),
+                        'VALOR'
+                    ))
+    except Exception as e:
+        logger.error(f"Erro no OCR: {e}")
+
+def processar_qrcode(frame):
+    """Processa QR Codes"""
+    data, bbox, _ = detector.detectAndDecode(frame)
+    if data and data.strip():
+        if evitar_repeticao(f"QR_{data}"):
+            logger.info(f"QR Code detectado: {data}")
+            falar_texto("QR Code detectado")
+            
+            if bbox is not None:
+                pts = bbox.astype(int).reshape(-1, 2)
+                for j in range(len(pts)):
+                    cv2.line(frame, tuple(pts[j]), tuple(pts[(j+1) % len(pts)]), CORES['QRCODE'], 3)
+                
+                # Adiciona contorno do QR Code
+                x_coords = pts[:, 0]
+                y_coords = pts[:, 1]
+                top_left = (min(x_coords), min(y_coords))
+                bottom_right = (max(x_coords), max(y_coords))
+                
+                contornos_ativos.append((
+                    (top_left, bottom_right), 
+                    f"QR: {data[:20]}...", 
+                    time.time(),
+                    'QRCODE'
+                ))
+
 print("[INFO] Aponte a câmera para o visor da maquininha ou QR Code...")
-logger.info("Sistema PayAI iniciado - Versão Vírgula Corrigida")
+logger.info("Sistema PayAI iniciado - Interface Melhorada + Tri-Mode")
 
 try:
     while True:
@@ -259,85 +383,55 @@ try:
         # Atualiza contornos (remove os antigos)
         atualizar_contornos_ativos()
 
-        # --- QR CODE (LEVE) - Processa em todo frame ---
-        data, bbox, _ = detector.detectAndDecode(frame)
-        if data and data.strip():
-            if evitar_repeticao(f"QR_{data}"):
-                logger.info(f"QR Code detectado: {data}")
-                falar_texto("QR Code detectado")
+        # --- PROCESSAMENTO BASEADO NO MODO ---
+        if modo_atual == MODOS['AUTO'] or modo_atual == MODOS['VALORES']:
+            if (agora - ultimo_processamento > OCR_INTERVAL and 
+                frame_count % SKIP_FRAMES == 0):
                 
-                if bbox is not None:
-                    pts = bbox.astype(int).reshape(-1, 2)
-                    for j in range(len(pts)):
-                        cv2.line(frame, tuple(pts[j]), tuple(pts[(j+1) % len(pts)]), (0,255,0), 2)
-                    cv2.putText(frame, "QR Code", (pts[0][0], pts[0][1]-10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+                ultimo_processamento = agora
+                threading.Thread(target=processar_valores, args=(frame.copy(),), daemon=True).start()
 
-        # --- OCR PESADO - Processa com intervalo e frame skipping ---
-        if (agora - ultimo_processamento > OCR_INTERVAL and 
-            frame_count % SKIP_FRAMES == 0):
-            
-            ultimo_processamento = agora
-            
-            try:
-                def processar_ocr_async():
-                    small_frame = cv2.resize(frame, RESIZE_OCR)
-                    gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
-                    
-                    results = reader.readtext(
-                        gray, 
-                        detail=1, 
-                        paragraph=False, 
-                        batch_size=1,
-                        width_ths=2.0,
-                        height_ths=2.0
-                    )
-                    
-                    for (bbox, texto, conf) in results:
-                        if conf > 0.7:
-                            valor_monetario = filtrar_valor_monetario(texto)
-                            
-                            if valor_monetario and evitar_repeticao(valor_monetario):
-                                logger.info(f"Valor detectado: {valor_monetario} (confiança: {conf:.2f})")
-                                falar_texto(valor_monetario)
-                                
-                                # Ajusta coordenadas para frame original
-                                scale_x = 640 / RESIZE_OCR[0]
-                                scale_y = 480 / RESIZE_OCR[1]
-                                top_left = (int(bbox[0][0] * scale_x), int(bbox[0][1] * scale_y))
-                                bottom_right = (int(bbox[2][0] * scale_x), int(bbox[2][1] * scale_y))
-                                
-                                # Adiciona à lista de contornos ativos
-                                contornos_ativos.append((
-                                    (top_left, bottom_right), 
-                                    valor_monetario, 
-                                    time.time()
-                                ))
-                
-                threading.Thread(target=processar_ocr_async, daemon=True).start()
-                                
-            except Exception as e:
-                logger.error(f"Erro no OCR: {e}")
+        if modo_atual == MODOS['AUTO'] or modo_atual == MODOS['QRCODE']:
+            processar_qrcode(frame)
 
         # --- DESENHA CONTORNOS ATIVOS ---
-        for (top_left, bottom_right), texto, timestamp in contornos_ativos:
+        for (top_left, bottom_right), texto, timestamp, tipo in contornos_ativos:
             tempo_restante = CONTORNO_TEMPO_VIDA - (agora - timestamp)
-            alpha = max(0.3, tempo_restante / CONTORNO_TEMPO_VIDA)
+            alpha = max(0.4, tempo_restante / CONTORNO_TEMPO_VIDA)
+            
+            # Escolhe cor baseada no tipo
+            cor = CORES['VALOR'] if tipo == 'VALOR' else CORES['QRCODE']
             
             # Desenha retângulo semi-transparente
             overlay = frame.copy()
-            cv2.rectangle(overlay, top_left, bottom_right, (255, 0, 0), 2)
-            cv2.putText(overlay, texto, (top_left[0], top_left[1]-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            cv2.rectangle(overlay, top_left, bottom_right, cor, 2)
+            desenhar_texto_bonito(overlay, texto, (top_left[0], top_left[1]-15), cor, 0.6, 1)
             cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
 
-        # Exibe o vídeo
-        cv2.imshow("PayAI - Vírgula Corrigida", frame)
+        # --- DESENHA INTERFACE ---
+        desenhar_interface(frame)
 
-        # Pressione ESC para sair
-        if cv2.waitKey(1) & 0xFF == 27:
+        # Exibe o vídeo
+        cv2.imshow("PayAI - Sistema Avançado", frame)
+
+        # --- CONTROLE DE TECLADO ---
+        key = cv2.waitKey(1) & 0xFF
+        
+        if key == 27:  # ESC - Sair
             logger.info("Sistema encerrado pelo usuário")
             break
+        elif key == ord('v') or key == ord('V'):  # V - Modo Valores
+            modo_atual = MODOS['VALORES']
+            falar_texto("Modo valores ativado")
+            logger.info("Modo alterado para VALORES")
+        elif key == ord('q') or key == ord('Q'):  # Q - Modo QR Code
+            modo_atual = MODOS['QRCODE']
+            falar_texto("Modo QR Code ativado")
+            logger.info("Modo alterado para QRCODE")
+        elif key == ord('a') or key == ord('A'):  # A - Modo Automático
+            modo_atual = MODOS['AUTO']
+            falar_texto("Modo automático ativado")
+            logger.info("Modo alterado para AUTO")
 
 except Exception as e:
     logger.error(f"Erro crítico no sistema: {e}")
