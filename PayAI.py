@@ -82,17 +82,17 @@ MODOS = {
 }
 modo_atual = MODOS['AUTO']
 
-# Paleta de cores moderna sem emojis
+# Paleta de cores branco, preto e cinza
 CORES = {
-    'PRIMARIA': (0, 180, 255),      # Laranja moderno
-    'SECUNDARIA': (255, 100, 0),    # Azul elétrico
-    'SUCESSO': (50, 255, 50),       # Verde vibrante
-    'ALERTA': (0, 200, 255),        # Amarelo dourado
-    'PERIGO': (0, 100, 255),        # Vermelho coral
-    'BACKGROUND': (20, 20, 30),     # Azul escuro elegante
-    'CARDBG': (30, 30, 45),         # Fundo de cards
-    'TEXTO': (240, 240, 240),       # Branco suave
-    'TEXTOSEC': (180, 180, 200)     # Texto secundário
+    'BRANCO': (255, 255, 255),      # Branco puro
+    'PRETO': (0, 0, 0),            # Preto puro
+    'CINZA_ESCURO': (40, 40, 40),  # Cinza escuro
+    'CINZA_MEDIO': (100, 100, 100), # Cinza médio
+    'CINZA_CLARO': (180, 180, 180), # Cinza claro
+    'CINZA_CARDBG': (50, 50, 50),   # Cinza para cards
+    'DESTAQUE': (200, 200, 200),    # Cinza de destaque
+    'SUCESSO': (150, 150, 150),     # Cinza para sucesso
+    'ALERTA': (120, 120, 120)       # Cinza para alertas
 }
 
 def converter_numero_para_portugues(numero):
@@ -257,9 +257,9 @@ def desenhar_texto_estilizado(frame, texto, posicao, cor, tamanho=0.7, espessura
     x, y = posicao
     
     if sombra:
-        # Sombra suave
+        # Sombra preta
         cv2.putText(frame, texto, (x+1, y+1), 
-                    cv2.FONT_HERSHEY_SIMPLEX, tamanho, (0, 0, 0), espessura + 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, tamanho, CORES['PRETO'], espessura + 2)
     
     # Texto principal
     cv2.putText(frame, texto, (x, y), 
@@ -276,32 +276,29 @@ def criar_card_arredondado(frame, x1, y1, x2, y2, cor, alpha=0.9):
     cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
     
     # Borda sutil
-    cv2.rectangle(frame, (x1, y1), (x2, y2), cor, 1)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), CORES['CINZA_CLARO'], 1)
 
-def desenhar_interface_moderna(frame):
-    """Desenha interface moderna e elegante sem emojis"""
+def desenhar_interface_monocromatica(frame):
+    """Desenha interface em preto, branco e cinza"""
     altura = frame.shape[0]
     largura = frame.shape[1]
     
-    # Header gradiente
-    for i in range(50):
-        alpha = i / 50
-        cor = tuple(int(c * alpha) for c in CORES['BACKGROUND'])
-        cv2.line(frame, (0, i), (largura, i), cor, 1)
+    # Header em cinza escuro
+    cv2.rectangle(frame, (0, 0), (largura, 50), CORES['CINZA_ESCURO'], -1)
     
     # Logo/Título
-    desenhar_texto_estilizado(frame, "PAY AI", (20, 35), CORES['PRIMARIA'], 1.1, 2)
-    desenhar_texto_estilizado(frame, "Sistema Inteligente", (150, 35), CORES['TEXTO'], 0.6, 1)
+    desenhar_texto_estilizado(frame, "PAY AI", (20, 35), CORES['BRANCO'], 1.1, 2)
+    desenhar_texto_estilizado(frame, "Sistema Inteligente", (150, 35), CORES['CINZA_CLARO'], 0.6, 1)
     
     # Card do modo atual
     modos_texto = ["AUTO", "VALORES", "QR CODE"]
     modo_texto = modos_texto[modo_atual]
-    criar_card_arredondado(frame, largura - 180, 15, largura - 10, 45, CORES['CARDBG'])
-    desenhar_texto_estilizado(frame, f"MODO: {modo_texto}", (largura - 170, 35), CORES['ALERTA'], 0.6, 1)
+    criar_card_arredondado(frame, largura - 180, 15, largura - 10, 45, CORES['CINZA_CARDBG'])
+    desenhar_texto_estilizado(frame, f"MODO: {modo_texto}", (largura - 170, 35), CORES['DESTAQUE'], 0.6, 1)
     
-    # Footer
+    # Footer em cinza escuro
     footer_y = altura - 70
-    criar_card_arredondado(frame, 0, footer_y, largura, altura, CORES['BACKGROUND'], 0.8)
+    cv2.rectangle(frame, (0, footer_y), (largura, altura), CORES['CINZA_ESCURO'], -1)
     
     # Instruções em cards individuais
     instrucoes = [
@@ -321,12 +318,12 @@ def desenhar_interface_moderna(frame):
         y1 = footer_y + 10
         y2 = altura - 10
         
-        criar_card_arredondado(frame, x1, y1, x2, y2, CORES['CARDBG'])
+        criar_card_arredondado(frame, x1, y1, x2, y2, CORES['CINZA_CARDBG'])
         
-        # Tecla
-        desenhar_texto_estilizado(frame, tecla, (x1 + 45, y1 + 25), CORES['PRIMARIA'], 0.9, 2)
-        # Descrição
-        desenhar_texto_estilizado(frame, descricao, (x1 + 25, y1 + 45), CORES['TEXTOSEC'], 0.5, 1)
+        # Tecla em branco
+        desenhar_texto_estilizado(frame, tecla, (x1 + 45, y1 + 25), CORES['BRANCO'], 0.9, 2)
+        # Descrição em cinza claro
+        desenhar_texto_estilizado(frame, descricao, (x1 + 25, y1 + 45), CORES['CINZA_CLARO'], 0.5, 1)
 
 def processar_valores(frame):
     """Processa valores monetários"""
@@ -376,7 +373,7 @@ def processar_qrcode(frame):
             if bbox is not None:
                 pts = bbox.astype(int).reshape(-1, 2)
                 for j in range(len(pts)):
-                    cv2.line(frame, tuple(pts[j]), tuple(pts[(j+1) % len(pts)]), CORES['SECUNDARIA'], 3)
+                    cv2.line(frame, tuple(pts[j]), tuple(pts[(j+1) % len(pts)]), CORES['BRANCO'], 3)
                 
                 x_coords = pts[:, 0]
                 y_coords = pts[:, 1]
@@ -392,7 +389,7 @@ def processar_qrcode(frame):
                 ))
 
 print("[INFO] Aponte a câmera para o visor da maquininha ou QR Code...")
-logger.info("Sistema PayAI iniciado - Interface Moderna Sem Emojis")
+logger.info("Sistema PayAI iniciado - Interface Monocromática")
 
 try:
     while True:
@@ -422,7 +419,8 @@ try:
             tempo_restante = CONTORNO_TEMPO_VIDA - (agora - timestamp)
             alpha = max(0.5, tempo_restante / CONTORNO_TEMPO_VIDA)
             
-            cor = CORES['SUCESSO'] if tipo == 'VALOR' else CORES['SECUNDARIA']
+            # Usa branco para ambos os tipos (valores e QR codes)
+            cor = CORES['BRANCO']
             
             overlay = frame.copy()
             cv2.rectangle(overlay, top_left, bottom_right, cor, 3)
@@ -430,8 +428,8 @@ try:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, cor, 2)
             cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
 
-        # --- DESENHA INTERFACE MODERNA ---
-        desenhar_interface_moderna(frame)
+        # --- DESENHA INTERFACE MONOCROMÁTICA ---
+        desenhar_interface_monocromatica(frame)
 
         # Exibe o vídeo
         cv2.imshow("PayAI - Sistema Inteligente", frame)
