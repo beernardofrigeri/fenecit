@@ -82,13 +82,17 @@ MODOS = {
 }
 modo_atual = MODOS['AUTO']
 
-# Cores e estilo
+# Paleta de cores moderna
 CORES = {
-    'VALOR': (0, 255, 0),       # Verde para valores
-    'QRCODE': (255, 0, 255),    # Magenta para QR Codes
-    'MODO': (0, 255, 255),      # Amarelo para informações de modo
-    'BACKGROUND': (0, 0, 0),    # Preto para fundo
-    'TEXTO': (255, 255, 255)    # Branco para texto
+    'PRIMARIA': (0, 180, 255),      # Laranja moderno
+    'SECUNDARIA': (255, 100, 0),    # Azul elétrico
+    'SUCESSO': (50, 255, 50),       # Verde vibrante
+    'ALERTA': (0, 200, 255),        # Amarelo dourado
+    'PERIGO': (0, 100, 255),        # Vermelho coral
+    'BACKGROUND': (20, 20, 30),     # Azul escuro elegante
+    'CARDBG': (30, 30, 45),         # Fundo de cards
+    'TEXTO': (240, 240, 240),       # Branco suave
+    'TEXTOSEC': (180, 180, 200)     # Texto secundário
 }
 
 def converter_numero_para_portugues(numero):
@@ -96,7 +100,6 @@ def converter_numero_para_portugues(numero):
     if numero == 0:
         return "zero"
     
-    # Para números pequenos (até 99), converte completamente
     if numero <= 99:
         unidades = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
         dez_a_dezenove = ['dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove']
@@ -114,7 +117,6 @@ def converter_numero_para_portugues(numero):
             else:
                 return f"{dezenas[dezena]} e {unidades[unidade]}"
     
-    # Para números maiores (100+), mantém a lógica anterior simplificada
     elif numero <= 999:
         centenas = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos']
         
@@ -136,7 +138,6 @@ def converter_numero_para_portugues(numero):
         return texto
     
     else:
-        # Para números muito grandes, formata com pontos
         return f"{numero:,}".replace(",", ".")
 
 def falar_texto(texto):
@@ -144,11 +145,8 @@ def falar_texto(texto):
     def falar():
         with fala_lock:
             try:
-                # Se for um valor monetário, converte o número
                 if 'reais' in texto.lower() or 'centavos' in texto.lower():
-                    # Extrai números do texto
                     if ' e ' in texto:
-                        # Caso "X reais e Y centavos"
                         partes = texto.split(' e ')
                         if len(partes) == 2:
                             reais_match = re.search(r'(\d+)\s*reais', partes[0])
@@ -169,7 +167,6 @@ def falar_texto(texto):
                         else:
                             texto_final = texto
                     else:
-                        # Caso simples "X reais" ou "Y centavos"
                         match_reais = re.search(r'(\d+)\s*reais', texto.lower())
                         match_centavos = re.search(r'(\d+)\s*centavos', texto.lower())
                         
@@ -198,36 +195,29 @@ def falar_texto(texto):
 
 def filtrar_valor_monetario(texto):
     """Filtra e formata valores monetários - identifica vírgula corretamente"""
-    # Padrões mais flexíveis para capturar valores como "15,00"
     padroes = [
-        r'(\d{1,3}(?:\.\d{3})*,\d{2})',  # 1.500,00 ou 15,00
-        r'(\d+,\d{2})',                   # 15,00
-        r'R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})',  # R$ 15,00
-        r'R\$\s*(\d+,\d{2})',                   # R$ 15,00
+        r'(\d{1,3}(?:\.\d{3})*,\d{2})',
+        r'(\d+,\d{2})',
+        r'R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})',
+        r'R\$\s*(\d+,\d{2})',
     ]
     
     for padrao in padroes:
         match = re.search(padrao, texto)
         if match:
             valor_com_virgula = match.group(1)
-            
-            # Verifica se tem pelo menos 1 dígito antes da vírgula
             partes = valor_com_virgula.split(',')
             if len(partes) == 2 and partes[0].isdigit():
-                # Remove pontos de milhar se existirem
                 parte_inteira = partes[0].replace('.', '')
                 parte_decimal = partes[1]
                 
-                # Converte para número
                 try:
                     valor_numerico = float(f"{parte_inteira}.{parte_decimal}")
                     
-                    # Se os centavos são 00, fala como inteiro
                     if parte_decimal == '00':
                         valor_int = int(parte_inteira)
                         return f"{valor_int} reais"
                     else:
-                        # Para valores com centavos, fala "X reais e Y centavos"
                         inteiro = int(parte_inteira)
                         centavos = int(parte_decimal)
                         
@@ -262,46 +252,81 @@ def atualizar_contornos_ativos():
     contornos_ativos = [(bbox, texto, ts, tipo) for bbox, texto, ts, tipo in contornos_ativos 
                        if (agora - ts) < CONTORNO_TEMPO_VIDA]
 
-def desenhar_texto_bonito(frame, texto, posicao, cor, tamanho=0.7, espessura=2):
-    """Desenha texto com sombra para melhor legibilidade"""
+def desenhar_texto_estilizado(frame, texto, posicao, cor, tamanho=0.7, espessura=2, sombra=True):
+    """Desenha texto com estilo moderno"""
     x, y = posicao
     
-    # Sombra
-    cv2.putText(frame, texto, (x+2, y+2), 
-                cv2.FONT_HERSHEY_SIMPLEX, tamanho, CORES['BACKGROUND'], espessura+1)
+    if sombra:
+        # Sombra suave
+        cv2.putText(frame, texto, (x+1, y+1), 
+                    cv2.FONT_HERSHEY_SIMPLEX, tamanho, (0, 0, 0), espessura + 2)
     
     # Texto principal
     cv2.putText(frame, texto, (x, y), 
                 cv2.FONT_HERSHEY_SIMPLEX, tamanho, cor, espessura)
 
-def desenhar_interface(frame):
-    """Desenha a interface do usuário"""
+def criar_card_arredondado(frame, x1, y1, x2, y2, cor, alpha=0.9):
+    """Cria um card com cantos arredondados"""
+    overlay = frame.copy()
+    
+    # Retângulo principal
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), cor, -1)
+    
+    # Aplica transparência
+    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+    
+    # Borda sutil
+    cv2.rectangle(frame, (x1, y1), (x2, y2), cor, 1)
+
+def desenhar_interface_moderna(frame):
+    """Desenha interface moderna e elegante"""
     altura = frame.shape[0]
     largura = frame.shape[1]
     
-    # Barra superior
-    cv2.rectangle(frame, (0, 0), (largura, 40), CORES['BACKGROUND'], -1)
+    # Header gradiente
+    for i in range(50):
+        alpha = i / 50
+        cor = tuple(int(c * alpha) for c in CORES['BACKGROUND'])
+        cv2.line(frame, (0, i), (largura, i), cor, 1)
     
-    # Título
-    desenhar_texto_bonito(frame, "PayAI - Sistema de Reconhecimento", (10, 30), CORES['TEXTO'], 0.8, 1)
+    # Logo/Título
+    desenhar_texto_estilizado(frame, "🤖 PayAI", (20, 35), CORES['PRIMARIA'], 1.1, 2)
+    desenhar_texto_estilizado(frame, "Sistema Inteligente", (200, 35), CORES['TEXTO'], 0.6, 1)
     
-    # Modo atual
-    modos_texto = ["AUTO", "VALORES", "QR CODE"]
+    # Card do modo atual
+    modos_texto = ["🔄 AUTO", "💰 VALORES", "🔷 QR CODE"]
     modo_texto = modos_texto[modo_atual]
-    desenhar_texto_bonito(frame, f"Modo: {modo_texto}", (largura - 200, 30), CORES['MODO'], 0.7, 1)
+    criar_card_arredondado(frame, largura - 180, 15, largura - 10, 45, CORES['CARDBG'])
+    desenhar_texto_estilizado(frame, f"Modo: {modo_texto}", (largura - 170, 35), CORES['ALERTA'], 0.6, 1)
     
-    # Barra inferior com instruções
-    cv2.rectangle(frame, (0, altura-60), (largura, altura), CORES['BACKGROUND'], -1)
+    # Footer
+    footer_y = altura - 70
+    criar_card_arredondado(frame, 0, footer_y, largura, altura, CORES['BACKGROUND'], 0.8)
     
+    # Instruções em cards individuais
     instrucoes = [
-        "ESC: Sair",
-        "V: Modo Valores", 
-        "Q: Modo QR Code",
-        "A: Modo Automático"
+        ("ESC", "Sair"),
+        ("V", "Valores"), 
+        ("Q", "QR Code"),
+        ("A", "Automático")
     ]
     
-    for i, instrucao in enumerate(instrucoes):
-        desenhar_texto_bonito(frame, instrucao, (10 + i*150, altura-20), CORES['TEXTO'], 0.5, 1)
+    card_largura = 120
+    espacamento = 10
+    inicio_x = (largura - (len(instrucoes) * card_largura + (len(instrucoes)-1) * espacamento)) // 2
+    
+    for i, (tecla, descricao) in enumerate(instrucoes):
+        x1 = inicio_x + i * (card_largura + espacamento)
+        x2 = x1 + card_largura
+        y1 = footer_y + 10
+        y2 = altura - 10
+        
+        criar_card_arredondado(frame, x1, y1, x2, y2, CORES['CARDBG'])
+        
+        # Tecla
+        desenhar_texto_estilizado(frame, tecla, (x1 + 45, y1 + 25), CORES['PRIMARIA'], 0.9, 2)
+        # Descrição
+        desenhar_texto_estilizado(frame, descricao, (x1 + 25, y1 + 45), CORES['TEXTOSEC'], 0.5, 1)
 
 def processar_valores(frame):
     """Processa valores monetários"""
@@ -326,16 +351,14 @@ def processar_valores(frame):
                     logger.info(f"Valor detectado: {valor_monetario} (confiança: {conf:.2f})")
                     falar_texto(valor_monetario)
                     
-                    # Ajusta coordenadas para frame original
                     scale_x = 640 / RESIZE_OCR[0]
                     scale_y = 480 / RESIZE_OCR[1]
                     top_left = (int(bbox[0][0] * scale_x), int(bbox[0][1] * scale_y))
                     bottom_right = (int(bbox[2][0] * scale_x), int(bbox[2][1] * scale_y))
                     
-                    # Adiciona à lista de contornos ativos
                     contornos_ativos.append((
                         (top_left, bottom_right), 
-                        valor_monetario, 
+                        f"💰 {valor_monetario}", 
                         time.time(),
                         'VALOR'
                     ))
@@ -353,23 +376,23 @@ def processar_qrcode(frame):
             if bbox is not None:
                 pts = bbox.astype(int).reshape(-1, 2)
                 for j in range(len(pts)):
-                    cv2.line(frame, tuple(pts[j]), tuple(pts[(j+1) % len(pts)]), CORES['QRCODE'], 3)
+                    cv2.line(frame, tuple(pts[j]), tuple(pts[(j+1) % len(pts)]), CORES['SECUNDARIA'], 3)
                 
-                # Adiciona contorno do QR Code
                 x_coords = pts[:, 0]
                 y_coords = pts[:, 1]
                 top_left = (min(x_coords), min(y_coords))
                 bottom_right = (max(x_coords), max(y_coords))
                 
+                texto_qr = data[:15] + "..." if len(data) > 15 else data
                 contornos_ativos.append((
                     (top_left, bottom_right), 
-                    f"QR: {data[:20]}...", 
+                    f"🔷 QR: {texto_qr}", 
                     time.time(),
                     'QRCODE'
                 ))
 
 print("[INFO] Aponte a câmera para o visor da maquininha ou QR Code...")
-logger.info("Sistema PayAI iniciado - Interface Melhorada + Tri-Mode")
+logger.info("Sistema PayAI iniciado - Interface Moderna")
 
 try:
     while True:
@@ -380,7 +403,7 @@ try:
         frame_count += 1
         agora = time.time()
 
-        # Atualiza contornos (remove os antigos)
+        # Atualiza contornos
         atualizar_contornos_ativos()
 
         # --- PROCESSAMENTO BASEADO NO MODO ---
@@ -397,41 +420,37 @@ try:
         # --- DESENHA CONTORNOS ATIVOS ---
         for (top_left, bottom_right), texto, timestamp, tipo in contornos_ativos:
             tempo_restante = CONTORNO_TEMPO_VIDA - (agora - timestamp)
-            alpha = max(0.4, tempo_restante / CONTORNO_TEMPO_VIDA)
+            alpha = max(0.5, tempo_restante / CONTORNO_TEMPO_VIDA)
             
-            # Escolhe cor baseada no tipo
-            cor = CORES['VALOR'] if tipo == 'VALOR' else CORES['QRCODE']
+            cor = CORES['SUCESSO'] if tipo == 'VALOR' else CORES['SECUNDARIA']
             
-            # Desenha retângulo semi-transparente
             overlay = frame.copy()
-            cv2.rectangle(overlay, top_left, bottom_right, cor, 2)
-            desenhar_texto_bonito(overlay, texto, (top_left[0], top_left[1]-15), cor, 0.6, 1)
+            cv2.rectangle(overlay, top_left, bottom_right, cor, 3)
+            cv2.putText(overlay, texto, (top_left[0], top_left[1]-20), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, cor, 2)
             cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
 
-        # --- DESENHA INTERFACE ---
-        desenhar_interface(frame)
+        # --- DESENHA INTERFACE MODERNA ---
+        desenhar_interface_moderna(frame)
 
         # Exibe o vídeo
-        cv2.imshow("PayAI - Sistema Avançado", frame)
+        cv2.imshow("PayAI - Sistema Inteligente", frame)
 
         # --- CONTROLE DE TECLADO ---
         key = cv2.waitKey(1) & 0xFF
         
-        if key == 27:  # ESC - Sair
+        if key == 27:  # ESC
             logger.info("Sistema encerrado pelo usuário")
             break
-        elif key == ord('v') or key == ord('V'):  # V - Modo Valores
+        elif key == ord('v') or key == ord('V'):
             modo_atual = MODOS['VALORES']
             falar_texto("Modo valores ativado")
-            logger.info("Modo alterado para VALORES")
-        elif key == ord('q') or key == ord('Q'):  # Q - Modo QR Code
+        elif key == ord('q') or key == ord('Q'):
             modo_atual = MODOS['QRCODE']
             falar_texto("Modo QR Code ativado")
-            logger.info("Modo alterado para QRCODE")
-        elif key == ord('a') or key == ord('A'):  # A - Modo Automático
+        elif key == ord('a') or key == ord('A'):
             modo_atual = MODOS['AUTO']
             falar_texto("Modo automático ativado")
-            logger.info("Modo alterado para AUTO")
 
 except Exception as e:
     logger.error(f"Erro crítico no sistema: {e}")
