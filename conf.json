@@ -1,0 +1,16 @@
+{
+  "ocr": {
+    "intervalo": 0.3,
+    "skip_frames": 5,
+    "tamanho_redimensionado": [320, 240],
+    "confianca_minima": 0.7
+  },
+  "audio": {
+    "taxa_fala": 180,
+    "tempo_entre_falas": 3
+  },
+  "interface": {
+    "tempo_vida_contorno": 3.0,
+    "mostrar_fps": true
+  }
+}
