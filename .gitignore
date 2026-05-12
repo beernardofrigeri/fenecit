@@ -1,9 +1,32 @@
-node_modules/
-dist/
+# Ambiente virtual
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# Build
 build/
+dist/
+
+# IDEs
 .vscode/
 .idea/
+
+# Cache
 .cache/
-venv/
-__pycache__/
-*.log
+
+# Screenshots do sistema
+screenshot_*.png
+
+# Configs locais
+config.json
+
+# Windows
+Thumbs.db
+Desktop.ini
