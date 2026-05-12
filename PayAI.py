@@ -25,21 +25,36 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── OCR / VOZ ─────────────────────────────────────────────────
-reader = easyocr.Reader(['pt', 'en'], gpu=False)
+reader = easyocr.Reader(['pt', 'en', 'es'], gpu=False)
 
 engine = pyttsx3.init()
-engine.setProperty('rate', 180)
+engine.setProperty('rate', 130)
+
 voices = engine.getProperty('voices')
+
 voz_ptbr = None
+voz_esco = None
+
 for voice in voices:
-    if any(t in voice.name.lower() for t in ['portugues','brazil','brasil','pt','br']):
+    nome = voice.name.lower()
+
+    # Português
+    if any(t in nome for t in ['portugues', 'brazil', 'brasil', 'pt', 'br']):
         voz_ptbr = voice
-        break
+
+    # Espanhol
+    if any(t in nome for t in ['spanish', 'español', 'espanol', 'colombia', 'es']):
+        voz_esco = voice
+
 if voz_ptbr:
-    engine.setProperty('voice', voz_ptbr.id)
-    logger.info(f"Voz em portugues configurada: {voz_ptbr.name}")
+    logger.info(f"Voz PT-BR configurada: {voz_ptbr.name}")
 else:
-    logger.warning("Voz em portugues nao encontrada. Usando voz padrao.")
+    logger.warning("Voz PT-BR nao encontrada")
+
+if voz_esco:
+    logger.info(f"Voz ES-CO configurada: {voz_esco.name}")
+else:
+    logger.warning("Voz ES-CO nao encontrada")
 
 # ── CAMERA ────────────────────────────────────────────────────
 cap = cv2.VideoCapture(0)
@@ -65,9 +80,17 @@ OCR_INTERVAL         = 0.3
 SKIP_FRAMES          = 5
 RESIZE_OCR           = (320, 240)
 fala_lock            = threading.Lock()
+ultima_fala = ""
 
 MODOS = {'AUTO': 0, 'VALORES': 1, 'QRCODE': 2}
 modo_atual = MODOS['AUTO']
+
+IDIOMAS = {
+    'PT_BR': 0,
+    'ES_CO': 1
+}
+
+idioma_atual = IDIOMAS['PT_BR']
 
 # ── PALETA ────────────────────────────────────────────────────
 CORES = {
@@ -84,6 +107,18 @@ CORES = {
     'AZUL':         (80,  150, 255),
     'VERDE_STATUS': (50,  200, 100),
 }
+
+# ── IDIOMA ────────────────────────────────────────────────────
+def configurar_idioma():
+    global idioma_atual
+
+    if idioma_atual == IDIOMAS['PT_BR']:
+        if voz_ptbr:
+            engine.setProperty('voice', voz_ptbr.id)
+
+    elif idioma_atual == IDIOMAS['ES_CO']:
+        if voz_esco:
+            engine.setProperty('voice', voz_esco.id)
 
 # ── FONTES ────────────────────────────────────────────────────
 def carregar_fontes():
@@ -151,6 +186,7 @@ def desenhar_contornos(draw, agora):
 
 # ── INTERFACE ─────────────────────────────────────────────────
 def desenhar_interface(frame, estatisticas):
+
     img  = cv2_para_pil(frame)
     draw = ImageDraw.Draw(img, 'RGBA')
     W, H = img.size
@@ -165,87 +201,195 @@ def desenhar_interface(frame, estatisticas):
     draw.text((14 + lp + 4, 11), "AI", font=FONTES['logo_ai'], fill=CORES['TEXTO_PRIM'])
 
     # Separador vertical
-    draw.line([(14 + lp + 4 + 26, 13), (14 + lp + 4 + 26, 30)],
-              fill=(*CORES['BORDA'], 255), width=1)
+    draw.line(
+        [(14 + lp + 4 + 26, 13), (14 + lp + 4 + 26, 30)],
+        fill=(*CORES['BORDA'], 255),
+        width=1
+    )
 
     # Subtitulo
-    draw.text((14 + lp + 4 + 33, 14), "Sistema Inteligente",
-              font=FONTES['subtitulo'], fill=CORES['TEXTO_SEC'])
+    draw.text(
+        (14 + lp + 4 + 33, 14),
+        "Sistema Inteligente",
+        font=FONTES['subtitulo'],
+        fill=CORES['TEXTO_SEC']
+    )
 
-    # Badge do modo — canto direito do header
+    # ── BADGE MODO ───────────────────────────────────────────
     modos_cfg = {
         0: ("AUTO",    CORES['ACENTO']),
         1: ("VALORES", CORES['AMARELO']),
         2: ("QR CODE", CORES['AZUL']),
     }
-    modo_label, cor_modo = modos_cfg.get(modo_atual, ("AUTO", CORES['ACENTO']))
-    bw = int(FONTES['modo'].getlength(modo_label)) + 20
-    bx1 = W - bw - 12
-    rect_r(draw, bx1, 9, W - 12, 33, r=5,
-           fill=(*cor_modo, 22), outline=cor_modo, width=1)
-    texto_c(draw, modo_label, bx1 + bw // 2, 13, FONTES['modo'], cor_modo)
 
-    # ── STATS (canto superior esquerdo, abaixo do header) ─────
+    modo_label, cor_modo = modos_cfg.get(
+        modo_atual,
+        ("AUTO", CORES['ACENTO'])
+    )
+
+    rect_r(
+        draw,
+        W - 250,
+        9,
+        W - 170,
+        33,
+        r=5,
+        fill=(*cor_modo, 22),
+        outline=cor_modo,
+        width=1
+    )
+
+    texto_c(
+        draw,
+        modo_label,
+        W - 210,
+        13,
+        FONTES['modo'],
+        cor_modo
+    )
+
+    # ── BADGE IDIOMA ─────────────────────────────────────────
+    idioma_label = (
+        'PT-BR'
+        if idioma_atual == IDIOMAS['PT_BR']
+        else 'ES-CO'
+    )
+
+    rect_r(
+        draw,
+        W - 160,
+        9,
+        W - 12,
+        33,
+        r=5,
+        fill=(*CORES['AZUL'], 25),
+        outline=CORES['AZUL'],
+        width=1
+    )
+
+    texto_c(
+        draw,
+        idioma_label,
+        W - 86,
+        13,
+        FONTES['badge'],
+        CORES['AZUL']
+    )
+
+    # ── STATS ────────────────────────────────────────────────
     if estatisticas:
+
         stats = estatisticas.obter_estatisticas()
+
         itens = [
             ("Valores",  str(stats['valores_detectados'])),
             ("QR Codes", str(stats['qrcodes_detectados'])),
             ("Taxa",     f"{stats['detectoes_por_minuto']:.1f}/min"),
         ]
+
         sy = 50
+
         for label, valor in itens:
-            draw.text((14, sy), f"{label}:", font=FONTES['pequena'], fill=CORES['TEXTO_SEC'])
+
+            draw.text(
+                (14, sy),
+                f"{label}:",
+                font=FONTES['pequena'],
+                fill=CORES['TEXTO_SEC']
+            )
+
             lw = int(FONTES['pequena'].getlength(f"{label}:")) + 6
-            draw.text((14 + lw, sy), valor, font=FONTES['corpo_b'], fill=CORES['TEXTO_PRIM'])
+
+            draw.text(
+                (14 + lw, sy),
+                valor,
+                font=FONTES['corpo_b'],
+                fill=CORES['TEXTO_PRIM']
+            )
+
             sy += 16
 
-    # ── CONTORNOS ─────────────────────────────────────────────
+    # ── CONTORNOS ────────────────────────────────────────────
     desenhar_contornos(draw, time.time())
 
-    # ── FOOTER ────────────────────────────────────────────────
-    footer_y = H - 60
-    draw.rectangle([0, footer_y, W, H], fill=(*CORES['BG'], 220))
-    draw.line([(0, footer_y), (W, footer_y)], fill=(*CORES['BORDA'], 255), width=1)
+    # ── FOOTER ───────────────────────────────────────────────
+    footer_y = H - 72
 
-    botoes = [("ESC", "SAIR"), ("V", "VALORES"), ("Q", "QR CODE"), ("A", "AUTO"), ("S", "PRINT")]
-    card_w  = 96
-    gap     = 8
+    draw.rectangle(
+        [0, footer_y, W, H],
+        fill=(*CORES['BG'], 220)
+    )
+
+    draw.line(
+        [(0, footer_y), (W, footer_y)],
+        fill=(*CORES['BORDA'], 255),
+        width=1
+    )
+
+    botoes = [
+        ("ESC", "SAIR"),
+        ("V", "VALORES"),
+        ("Q", "QR CODE"),
+        ("A", "AUTO"),
+        ("I", "IDIOMA"),
+        ("R", "REPETIR"),
+        ("S", "PRINT")
+    ]
+
+    card_w  = 72
+    gap     = 4
     total_w = len(botoes) * card_w + (len(botoes) - 1) * gap
     bx_ini  = (W - total_w) // 2
 
     for i, (tecla, desc) in enumerate(botoes):
+
         cx1 = bx_ini + i * (card_w + gap)
         cx2 = cx1 + card_w
         cy1 = footer_y + 8
         cy2 = H - 8
 
         ativo = (
-            (tecla == "A"   and modo_atual == 0) or
-            (tecla == "V"   and modo_atual == 1) or
-            (tecla == "Q"   and modo_atual == 2)
+            (tecla == "A" and modo_atual == 0) or
+            (tecla == "V" and modo_atual == 1) or
+            (tecla == "Q" and modo_atual == 2)
         )
 
         cor_fill  = (*CORES['ACENTO_DIM'], 220) if ativo else (*CORES['CARD_BG'], 200)
         cor_borda = CORES['ACENTO'] if ativo else CORES['BORDA']
 
-        rect_r(draw, cx1, cy1, cx2, cy2, r=6,
-               fill=cor_fill, outline=cor_borda, width=1)
+        rect_r(
+            draw,
+            cx1,
+            cy1,
+            cx2,
+            cy2,
+            r=6,
+            fill=cor_fill,
+            outline=cor_borda,
+            width=1
+        )
 
         # Tecla
         tw = FONTES['hotkey'].getlength(tecla)
-        draw.text((cx1 + (card_w - tw) / 2, cy1 + 5), tecla,
-                  font=FONTES['hotkey'],
-                  fill=CORES['ACENTO'] if ativo else CORES['TEXTO_PRIM'])
+
+        draw.text(
+            (cx1 + (card_w - tw) / 2, cy1 + 5),
+            tecla,
+            font=FONTES['hotkey'],
+            fill=CORES['ACENTO'] if ativo else CORES['TEXTO_PRIM']
+        )
 
         # Label
         dw = FONTES['hotlabel'].getlength(desc)
-        draw.text((cx1 + (card_w - dw) / 2, cy2 - 17), desc,
-                  font=FONTES['hotlabel'],
-                  fill=CORES['ACENTO'] if ativo else CORES['TEXTO_SEC'])
+
+        draw.text(
+            (cx1 + (card_w - dw) / 2, cy2 - 17),
+            desc,
+            font=FONTES['hotlabel'],
+            fill=CORES['ACENTO'] if ativo else CORES['TEXTO_SEC']
+        )
 
     return pil_para_cv2(img)
-
 
 # ── CLASSES ───────────────────────────────────────────────────
 class Configuracao:
@@ -335,29 +479,129 @@ def _num_pt(n):
         return c[cent] + (" e " + _num_pt(r) if r else "")
     return f"{n:,}".replace(",", ".")
 
+# ── CONVERSAO ESPANHOL ───────────────────────────────────────
+def numero_es(n):
+
+    unidades = [
+        'cero', 'uno', 'dos', 'tres', 'cuatro',
+        'cinco', 'seis', 'siete', 'ocho', 'nueve'
+    ]
+
+    especiais = {
+        10: 'diez',
+        11: 'once',
+        12: 'doce',
+        13: 'trece',
+        14: 'catorce',
+        15: 'quince'
+    }
+
+    dezenas = {
+        20: 'veinte',
+        30: 'treinta',
+        40: 'cuarenta',
+        50: 'cincuenta',
+        60: 'sesenta',
+        70: 'setenta',
+        80: 'ochenta',
+        90: 'noventa'
+    }
+
+    if n < 10:
+        return unidades[n]
+
+    if n in especiais:
+        return especiais[n]
+
+    if n < 20:
+        return 'dieci' + unidades[n - 10]
+
+    if n < 30:
+        return 'veinti' + unidades[n - 20]
+
+    if n < 100:
+        d = (n // 10) * 10
+        r = n % 10
+
+        if r == 0:
+            return dezenas[d]
+
+        return f"{dezenas[d]} y {unidades[r]}"
+
+    return str(n)
 
 # ── VOZ ───────────────────────────────────────────────────────
 def falar_texto(texto):
+
+    global ultima_fala
+    ultima_fala = texto
+
     def _falar():
+
         with fala_lock:
+
             try:
+
                 tf = texto
-                mr = re.search(r'(\d+)\s*reais',    texto.lower())
+
+                mr = re.search(r'(\d+)\s*reais', texto.lower())
                 mc = re.search(r'(\d+)\s*centavos', texto.lower())
-                if mr:
-                    n  = int(mr.group(1))
-                    tf = f"{converter_numero_cache(n)} reais"
-                    if mc:
-                        tf += f" e {converter_numero_cache(int(mc.group(1)))} centavos"
-                elif mc:
-                    tf = f"{converter_numero_cache(int(mc.group(1)))} centavos"
+
+                # ── PORTUGUES ─────────────────────
+                if idioma_atual == IDIOMAS['PT_BR']:
+
+                    if mr:
+                        n = int(mr.group(1))
+                        tf = f"{converter_numero_cache(n)} reais"
+
+                        if mc:
+                            tf += f" e {converter_numero_cache(int(mc.group(1)))} centavos"
+
+                    elif mc:
+                        tf = f"{converter_numero_cache(int(mc.group(1)))} centavos"
+
+                # ── ESPANHOL ──────────────────────
+                elif idioma_atual == IDIOMAS['ES_CO']:
+
+                    if mr:
+                        n = int(mr.group(1))
+                        tf = f"{numero_es(n)} pesos colombianos"
+
+                    elif mc:
+                        tf = f"{numero_es(int(mc.group(1)))} centavos"
+
+                    tf = tf.replace(
+                        'QR Code detectado',
+                        'Código QR detectado'
+                    )
+
+                    tf = tf.replace(
+                        'Modo automatico ativado',
+                        'Modo automático activado'
+                    )
+
+                    tf = tf.replace(
+                        'Modo valores ativado',
+                        'Modo valores activado'
+                    )
+
+                    tf = tf.replace(
+                        'Modo QR Code ativado',
+                        'Modo código QR activado'
+                    )
+
+                    tf = tf.replace(
+                        'Screenshot salvo',
+                        'Captura guardada'
+                    )
+
                 engine.say(tf)
                 engine.runAndWait()
+
             except Exception as e:
                 logger.error(f"Erro na fala: {e}")
+
     threading.Thread(target=_falar, daemon=True).start()
-
-
 # ── FILTRO MONETARIO ──────────────────────────────────────────
 def validar_valor(val):
     try:
@@ -451,6 +695,7 @@ def processar_qrcode(frame, estat):
 config       = Configuracao()
 estatisticas = Estatisticas()
 ger_memoria  = GerenciadorMemoria()
+configurar_idioma()
 
 OCR_INTERVAL        = config.config['ocr']['intervalo']
 SKIP_FRAMES         = config.config['ocr']['skip_frames']
@@ -503,11 +748,23 @@ try:
         elif key in (ord('a'), ord('A')):
             modo_atual = MODOS['AUTO']
             falar_texto("Modo automatico ativado")
+        elif key in (ord('i'), ord('I')):
+            if idioma_atual == IDIOMAS['PT_BR']:
+                idioma_atual = IDIOMAS['ES_CO']
+                configurar_idioma()
+                falar_texto('Idioma español activado')
+            else:
+                idioma_atual = IDIOMAS['PT_BR']
+                configurar_idioma()
+                falar_texto('Idioma portugues ativado')
         elif key in (ord('s'), ord('S')):
             nome = f"screenshot_{time.strftime('%Y%m%d_%H%M%S')}.png"
             cv2.imwrite(nome, frame_final)
             logger.info(f"Screenshot: {nome}")
             falar_texto("Screenshot salvo")
+        elif key in (ord('r'), ord('R')):
+            if ultima_fala:
+                falar_texto(ultima_fala)
 
 except Exception as e:
     logger.error(f"Erro critico: {e}")
