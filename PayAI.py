@@ -1,6 +1,9 @@
 import cv2
 import easyocr
 import pyttsx3
+import asyncio
+import edge_tts
+import os
 import time
 import re
 import logging
@@ -12,6 +15,11 @@ from functools import lru_cache
 import json
 import os
 from PIL import ImageFont, ImageDraw, Image
+import pygame
+import tempfile
+import os
+
+pygame.mixer.init()
 
 # ── LOGGING ───────────────────────────────────────────────────
 logging.basicConfig(
@@ -29,6 +37,17 @@ reader = easyocr.Reader(['pt', 'en', 'es'], gpu=False)
 
 engine = pyttsx3.init()
 engine.setProperty('rate', 130)
+
+async def falar(texto):
+    communicate = edge_tts.Communicate(
+        text=texto,
+        voice="es-CO-GonzaloNeural",
+        rate="-15%"
+    )
+
+    await communicate.save("voz.mp3")
+
+    os.system("start voz.mp3")
 
 voices = engine.getProperty('voices')
 
@@ -531,6 +550,25 @@ def numero_es(n):
     return str(n)
 
 # ── VOZ ───────────────────────────────────────────────────────
+async def falar_edge(texto, voz="es-CO-GonzaloNeural"):
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+        caminho = fp.name
+
+    communicate = edge_tts.Communicate(texto, voz)
+
+    await communicate.save(caminho)
+
+    pygame.mixer.music.load(caminho)
+    pygame.mixer.music.play()
+
+    while pygame.mixer.music.get_busy():
+        await asyncio.sleep(0.1)
+
+    pygame.mixer.music.unload()
+
+    os.remove(caminho)
+
 def falar_texto(texto):
 
     global ultima_fala
@@ -595,8 +633,22 @@ def falar_texto(texto):
                         'Captura guardada'
                     )
 
-                engine.say(tf)
-                engine.runAndWait()
+                if idioma_atual == IDIOMAS['ES_CO']:
+                    asyncio.run(
+                        falar_edge(
+                            tf,
+                            "es-CO-GonzaloNeural"
+                        )
+                    )
+
+                else:
+
+                    asyncio.run(
+                        falar_edge(
+                            tf,
+                            "pt-BR-AntonioNeural"
+                        )
+                    )
 
             except Exception as e:
                 logger.error(f"Erro na fala: {e}")
