@@ -24,21 +24,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── OCR / VOZ ─────────────────────────────────────────────────
-reader = easyocr.Reader(
-    ['pt', 'es'],
-    gpu=False,
-    download_enabled=False
-)
+reader = None
+ocr_pronto = False
 
 # ── CAMERA ────────────────────────────────────────────────────
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-cap.set(cv2.CAP_PROP_FPS, 30)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-if not cap.isOpened():
-    logger.error("Erro ao acessar a camera.")
-    exit()
+cap = None
+camera_pronta = False
+
+progresso_loading = 0.0
 
 detector = cv2.QRCodeDetector()
 
@@ -75,7 +68,7 @@ idioma_atual = IDIOMAS['PT_BR']
 CORES = {
     'BRANCO':       (255, 255, 255),
     'PRETO':        (0,   0,   0),
-    'BG':           (13,  17,  23),
+    'BG':           (0,  0,  0),
     'CARD_BG':      (30,  35,  44),
     'BORDA':        (48,  54,  64),
     'TEXTO_SEC':    (130, 140, 160),
@@ -120,6 +113,49 @@ def cv2_para_pil(frame):
 
 def pil_para_cv2(img):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+# ── CARREGAMENTO OCR ──────────────────────────────────────────
+def carregar_ocr():
+
+    global reader
+    global ocr_pronto
+
+    logger.info("Carregando OCR...")
+
+    reader = easyocr.Reader(
+        ['pt', 'es'],
+        gpu=False,
+        download_enabled=False
+    )
+
+    ocr_pronto = True
+
+    logger.info("OCR carregado.")
+
+# ── CARREGAMENTO CAMERA ───────────────────────────────────────
+def carregar_camera():
+
+    global cap
+    global camera_pronta
+
+    logger.info("Inicializando camera...")
+
+    cap = cv2.VideoCapture(0)
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    if not cap.isOpened():
+
+        logger.error("Erro ao acessar camera.")
+
+        return
+
+    camera_pronta = True
+
+    logger.info("Camera pronta.")
 
 def rect_r(draw, x1, y1, x2, y2, r, fill=None, outline=None, width=1):
     if fill:
@@ -671,6 +707,9 @@ def atualizar_ou_criar_contorno(tl, br, texto, tipo):
 
 # ── PROCESSAMENTO ─────────────────────────────────────────────
 def processar_valores(frame, estat):
+    
+    if reader is None:
+        return
 
     global ocr_rodando
     ocr_rodando = True
@@ -742,10 +781,221 @@ estatisticas = Estatisticas()
 print("[INFO] Aponte a camera para o visor da maquininha ou QR Code...")
 logger.info("Sistema PayAI iniciado - 640x480")
 
+# ── THREAD DE CARREGAMENTO OCR ───────────────────────────────
+threading.Thread(
+    target=carregar_ocr,
+    daemon=True
+).start()
+
+# ── THREAD CAMERA ────────────────────────────────────────────
+threading.Thread(
+    target=carregar_camera,
+    daemon=True
+).start()
+
 # ── LOOP PRINCIPAL ────────────────────────────────────────────
 try:
     while True:
+                
+    # ── SPLASH SCREEN ───────────────────────────────────
+        if not camera_pronta or not ocr_pronto:
+
+            splash = np.zeros((480, 640, 3), dtype=np.uint8)
+
+            splash[:] = CORES['BG']
+
+            img = cv2_para_pil(splash)
+
+            draw = ImageDraw.Draw(img)
+
+            texto_c(
+                draw,
+                "PAYAI",
+                320,
+                165,
+                FONTES['logo_pay'],
+                CORES['ACENTO']
+            )
+
+            texto_c(
+                draw,
+                "Inicializando sistema...",
+                320,
+                225,
+                FONTES['corpo_b'],
+                CORES['TEXTO_PRIM']
+            )
+
+            status = []
+
+            if not camera_pronta:
+                status.append("Camera")
+
+            if not ocr_pronto:
+                status.append("OCR")
+
+            mensagens_loading = [
+
+                "Inicializando componentes",
+                "Preparando sistema",
+                "Carregando interface",
+                "Verificando modulos",
+                "Inicializando camera",
+                "Preparando reconhecimento",
+                "Otimizando OCR",
+                "Configurando acessibilidade",
+                "Preparando sistema de voz",
+                "Carregando deteccao inteligente",
+                "Verificando desempenho",
+                "Sincronizando componentes",
+                "Iniciando visao computacional",
+                "Preparando analise visual",
+                "Inicializando detector de QR Code",
+                "Configurando leitura monetaria",
+                "Preparando sistema multilíngue",
+                "Aplicando configuracoes",
+                "Carregando recursos visuais",
+                "Inicializando renderizacao",
+                "Otimizando reconhecimento textual",
+                "Preparando ambiente seguro",
+                "Inicializando processamento",
+                "Ajustando parametros",
+                "Preparando experiencia acessivel",
+                "Iniciando sistema principal",
+                "Finalizando carregamento",
+                "Preparando operacao em tempo real",
+                "Verificando estabilidade",
+                "Organizando recursos internos",
+                "Configurando analise inteligente",
+                "Inicializando assistente visual",
+                "Preparando leitura automatica",
+                "Sincronizando reconhecimento",
+                "Aplicando melhorias de desempenho",
+                "Verificando integridade do sistema",
+                "Otimizando inicializacao",
+                "Preparando captura de imagem",
+                "Ativando componentes principais",
+                "Preparando ambiente de execucao",
+
+            ]
+
+            indice_msg = int(
+                time.time() * 0.45
+            ) % len(mensagens_loading)
+
+            texto_status = mensagens_loading[indice_msg]
+
+            texto_c(
+                draw,
+                texto_status,
+                320,
+                255,
+                FONTES['pequena'],
+                CORES['TEXTO_SEC']
+            )
+
+            # Barra simples
+            draw.rounded_rectangle(
+                [170, 305, 470, 317],
+                radius=5,
+                fill=CORES['CARD_BG']
+            )
+
+            # ── PROGRESSO SUAVE ───────────────────────
+
+            alvo = 0.90
+
+            if camera_pronta and ocr_pronto:
+                alvo = 1.0
+
+            if progresso_loading < alvo:
+                progresso_loading += 0.025
+
+            progresso_loading = min(
+                progresso_loading,
+                alvo
+            )
+
+            largura = int(300 * progresso_loading)
+
+            draw.rounded_rectangle(
+                [170, 305, 170 + largura, 317],
+                radius=5,
+                fill=CORES['ACENTO']
+            )
+
+             # ── BRILHO SUAVE E CONTINUO ───────────
+
+            if largura > 80:
+
+                barra_x1 = 170
+                barra_x2 = 170 + largura
+
+                brilho_total = largura
+
+                brilho = (
+                    time.time() * 70
+                ) % brilho_total
+
+                shine_x = barra_x1 + brilho
+
+                brilho_largura = 28
+
+                # Evita sair seco da barra
+                if shine_x < barra_x2:
+
+                    # Fade perto da entrada
+                    entrada = min(
+                        1.0,
+                        max(
+                            0,
+                            (shine_x - barra_x1) / 25
+                        )
+                    )
+
+                    # Fade perto da saída
+                    saida = min(
+                        1.0,
+                        max(
+                            0,
+                            (barra_x2 - shine_x) / 25
+                        )
+                    )
+
+                    intensidade = min(
+                        entrada,
+                        saida
+                    )
+
+                    branco = int(
+                        140 + (115 * intensidade)
+                    )
+
+                    draw.rounded_rectangle(
+                        [
+                            shine_x - 2,
+                            307,
+                            shine_x + brilho_largura,
+                            315
+                        ],
+                        radius=4,
+                        fill=(branco, branco, branco)
+                    )
+
+            splash = pil_para_cv2(img)
+
+            cv2.imshow(
+                "PayAI - Sistema Inteligente",
+                splash
+            )
+
+            cv2.waitKey(1)
+
+            continue
+
+        # ── CAMERA NORMAL ───────────────────────────────────
         ret, frame = cap.read()
+
         if not ret:
             break
 
