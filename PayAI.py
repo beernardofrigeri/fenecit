@@ -54,6 +54,8 @@ ultima_fala          = ""
 # 🔥 NOVO
 ocr_rodando = False
 
+frame_ocr = None
+
 MODOS = {'AUTO': 0, 'VALORES': 1, 'QRCODE': 2}
 modo_atual = MODOS['AUTO']
 
@@ -769,6 +771,24 @@ def processar_valores(frame, estat):
     finally:
         ocr_rodando = False
 
+def loop_ocr(estat):
+
+    global frame_ocr
+    global ocr_rodando
+
+    while True:
+
+        if frame_ocr is not None and not ocr_rodando:
+
+            frame = frame_ocr.copy()
+
+            frame_ocr = None
+
+            processar_valores(frame, estat)
+
+        time.sleep(0.01)
+        
+
 def processar_qrcode(frame, estat):
     data, bbox, _ = detector.detectAndDecode(frame)
     if data and data.strip() and evitar_repeticao(f"QR_{data}"):
@@ -802,6 +822,12 @@ threading.Thread(
 ).start()
 
 # ── LOOP PRINCIPAL ────────────────────────────────────────────
+threading.Thread(
+    target=loop_ocr,
+    args=(estatisticas,),
+    daemon=True
+).start()
+
 try:
     while True:
                 
@@ -1021,9 +1047,7 @@ try:
                 frame_count % SKIP_FRAMES == 0
             ):
                 ultimo_processamento = agora
-                threading.Thread(target=processar_valores,
-                                 args=(frame.copy(), estatisticas),
-                                 daemon=True).start()
+                frame_ocr = frame.copy()
 
         if modo_atual in (MODOS['AUTO'], MODOS['QRCODE']):
             processar_qrcode(frame, estatisticas)
