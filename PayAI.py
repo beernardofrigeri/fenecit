@@ -120,17 +120,25 @@ def carregar_ocr():
     global reader
     global ocr_pronto
 
-    logger.info("Carregando OCR...")
+    try:
 
-    reader = easyocr.Reader(
-        ['pt', 'es'],
-        gpu=False,
-        download_enabled=False
-    )
+        logger.info("Carregando OCR...")
 
-    ocr_pronto = True
+        reader = easyocr.Reader(
+            ['pt', 'es'],
+            gpu=False,
+            download_enabled=True
+        )
 
-    logger.info("OCR carregado.")
+        ocr_pronto = True
+
+        logger.info("OCR carregado.")
+
+    except Exception as e:
+
+        logger.error(f"Erro carregando OCR: {e}")
+
+        print(e)
 
 # ── CARREGAMENTO CAMERA ───────────────────────────────────────
 def carregar_camera():
@@ -884,6 +892,8 @@ try:
             ) % len(mensagens_loading)
 
             texto_status = mensagens_loading[indice_msg]
+
+            texto_status += f" | CAM:{camera_pronta} OCR:{ocr_pronto}"
 
             texto_c(
                 draw,
