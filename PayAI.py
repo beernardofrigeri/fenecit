@@ -11,6 +11,7 @@ import numpy as np
 from PIL import ImageFont, ImageDraw, Image
 import pygame
 import tempfile
+from queue import Queue, Empty, Full
 
 # ── LOGGING ───────────────────────────────────────────────────
 logging.basicConfig(
@@ -54,7 +55,7 @@ ultima_fala          = ""
 # 🔥 NOVO
 ocr_rodando = False
 
-frame_ocr = None
+fila_ocr = Queue(maxsize=1)
 
 MODOS = {'AUTO': 0, 'VALORES': 1, 'QRCODE': 2}
 modo_atual = MODOS['AUTO']
@@ -773,34 +774,71 @@ def processar_valores(frame, estat):
 
 def loop_ocr(estat):
 
-    global frame_ocr
-    global ocr_rodando
-
     while True:
 
-        if frame_ocr is not None and not ocr_rodando:
+        try:
 
-            frame = frame_ocr.copy()
-
-            frame_ocr = None
+            frame = fila_ocr.get(timeout=0.1)
 
             processar_valores(frame, estat)
 
-        time.sleep(0.01)
+        except Empty:
+
+            pass
+
+        except Exception as e:
+
+            logger.error(f"Erro loop OCR: {e}")
         
 
 def processar_qrcode(frame, estat):
-    data, bbox, _ = detector.detectAndDecode(frame)
+
+    try:
+
+        data, bbox, _ = detector.detectAndDecode(frame)
+
+    except cv2.error as e:
+
+        logger.warning(f"Erro QRCodeDetector: {e}")
+
+        return
+
     if data and data.strip() and evitar_repeticao(f"QR_{data}"):
+
         logger.info(f"QR: {data}")
+
         estat.registrar_deteccao('QRCODE')
+
         falar_texto("QR Code detectado")
+
         if bbox is not None:
+
             pts = bbox.astype(int).reshape(-1, 2)
-            tl  = (int(pts[:, 0].min()), int(pts[:, 1].min()))
-            br  = (int(pts[:, 0].max()), int(pts[:, 1].max()))
-            txt = data[:18] + "..." if len(data) > 18 else data
-            contornos_ativos.append(((tl, br), f"QR: {txt}", time.time(), 'QRCODE'))
+
+            tl = (
+                int(pts[:, 0].min()),
+                int(pts[:, 1].min())
+            )
+
+            br = (
+                int(pts[:, 0].max()),
+                int(pts[:, 1].max())
+            )
+
+            txt = (
+                data[:18] + "..."
+                if len(data) > 18
+                else data
+            )
+
+            contornos_ativos.append(
+                (
+                    (tl, br),
+                    f"QR: {txt}",
+                    time.time(),
+                    'QRCODE'
+                )
+            )
 
 
 # ── INICIALIZACAO ─────────────────────────────────────────────
@@ -1047,7 +1085,10 @@ try:
                 frame_count % SKIP_FRAMES == 0
             ):
                 ultimo_processamento = agora
-                frame_ocr = frame.copy()
+                try:
+                    fila_ocr.put_nowait(frame.copy())
+                except Full:
+                    pass
 
         if modo_atual in (MODOS['AUTO'], MODOS['QRCODE']):
             processar_qrcode(frame, estatisticas)
