@@ -717,6 +717,58 @@ def atualizar_ou_criar_contorno(tl, br, texto, tipo):
 
 
 # ── PROCESSAMENTO ─────────────────────────────────────────────
+def detectar_regioes_texto(frame):
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # melhora contraste
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    # detecta bordas
+    edges = cv2.Canny(blur, 80, 150)
+
+    # junta áreas próximas
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (5, 3)
+    )
+
+    dilatada = cv2.dilate(
+        edges,
+        kernel,
+        iterations=2
+    )
+
+    contornos, _ = cv2.findContours(
+        dilatada,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    regioes = []
+
+    for cnt in contornos:
+
+        x, y, w, h = cv2.boundingRect(cnt)
+
+        # filtros contra lixo
+        if w < 60 or h < 20:
+            continue
+
+        if w > 500 or h > 200:
+            continue
+
+        area = w * h
+
+        if area < 1500:
+            continue
+
+        roi = frame[y:y+h, x:x+w]
+
+        regioes.append((roi, (x, y, w, h)))
+
+    return regioes
+
 def processar_valores(frame, estat):
     
     if reader is None:
@@ -726,20 +778,41 @@ def processar_valores(frame, estat):
     ocr_rodando = True
 
     try:
-        small = cv2.resize(frame, RESIZE_OCR)
-        gray  = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-        res   = reader.readtext(gray, detail=1, paragraph=False,
-                                batch_size=1, width_ths=2.0, height_ths=2.0)
+        regioes = detectar_regioes_texto(frame)
+        for roi, (rx, ry, rw, rh) in regioes:
+            small = cv2.resize(
+            roi,
+            RESIZE_OCR
+            )
+        gray = cv2.cvtColor(
+            small,
+            cv2.COLOR_BGR2GRAY
+        )
+        res = reader.readtext(
+            gray,
+            detail=1,
+            paragraph=False,
+            batch_size=1,
+            width_ths=2.0,
+            height_ths=2.0
+        )
         for (bbox, texto, conf) in res:
-            if conf > 0.7:
-                val = filtrar_valor_monetario(texto)
+            for (bbox, texto, conf) in res:
+                if conf > 0.7:
+                    val = filtrar_valor_monetario(texto)
                 if val:
 
                     sx = 640 / RESIZE_OCR[0]
                     sy = 480 / RESIZE_OCR[1]
 
-                    tl = (int(bbox[0][0] * sx), int(bbox[0][1] * sy))
-                    br = (int(bbox[2][0] * sx), int(bbox[2][1] * sy))
+                    tl = (
+                        int(bbox[0][0] * sx) + rx,
+                        int(bbox[0][1] * sy) + ry
+                    )
+                    br = (
+                        int(bbox[2][0] * sx) + rx,
+                        int(bbox[2][1] * sy) + ry
+                    )
 
                     valor_visual = texto.replace("R$", "").strip()
 
