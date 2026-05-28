@@ -136,7 +136,7 @@ def carregar_ocr():
 
         reader = easyocr.Reader(
             ['pt', 'es'],
-            gpu=False,
+            gpu=True,
             download_enabled=True
         )
 
@@ -441,8 +441,10 @@ class Estatisticas:
         self.inicio             = time.time()
 
     def registrar_deteccao(self, tipo):
-        if tipo == 'VALOR':    self.valores_detectados += 1
-        elif tipo == 'QRCODE': self.qrcodes_detectados += 1
+        if tipo == 'VALOR':    
+            self.valores_detectados += 1
+        elif tipo == 'QRCODE': 
+            self.qrcodes_detectados += 1
 
     def registrar_erro(self):
         self.erros_ocr += 1
@@ -461,7 +463,8 @@ class Estatisticas:
 # ── CONVERSAO NUMERICA ────────────────────────────────────────
 
 def _num_pt(n):
-    if n == 0: return "zero"
+    if n == 0: 
+        return "zero"
     if n <= 9:
         return ['','um','dois','tres','quatro','cinco','seis','sete','oito','nove'][n]
     if n <= 19:
@@ -473,7 +476,8 @@ def _num_pt(n):
         d, u = n // 10, n % 10
         return dez[d] if u == 0 else f"{dez[d]} e {_num_pt(u)}"
     if n <= 999:
-        if n == 100: return "cem"
+        if n == 100: 
+            return "cem"
         c = ['','cento','duzentos','trezentos','quatrocentos','quinhentos',
              'seiscentos','setecentos','oitocentos','novecentos']
         cent, r = n // 100, n % 100
@@ -643,18 +647,22 @@ def falar_texto(texto):
 def validar_valor(val):
     try:
         p = val.split(',')
-        if len(p) != 2: return False
+        if len(p) != 2: 
+            return False
         i, d = p[0].replace('.', ''), p[1]
-        if len(d) != 2 or not d.isdigit() or not i.isdigit(): return False
+        if len(d) != 2 or not d.isdigit() or not i.isdigit(): 
+            return False
         return 0 <= float(f"{i}.{d}") <= 10000
-    except:
+    except Exception:
         return False
 
 def formatar_fala(val):
     p    = val.split(',')
     i, c = int(p[0].replace('.', '')), int(p[1])
-    if c == 0: return f"{i} reais"
-    if i == 0: return f"{c} centavos"
+    if c == 0: 
+        return f"{i} reais"
+    if i == 0: 
+        return f"{c} centavos"
     return f"{i} reais e {c} centavos"
 
 def filtrar_valor_monetario(texto):
