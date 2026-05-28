@@ -12,6 +12,8 @@ from PIL import ImageFont, ImageDraw, Image
 import pygame
 import tempfile
 from queue import Queue, Empty, Full
+global ultimo_fps_tempo
+global fps_atual
 
 # ── LOGGING ───────────────────────────────────────────────────
 logging.basicConfig(
@@ -43,6 +45,11 @@ frame_count          = 0
 ultimo_processamento = 0
 contornos_ativos     = []
 ultimos_detectados   = {}
+
+fps_atual = 0
+ultimo_fps_tempo = time.time()
+tempo_ocr = 0
+regioes_detectadas = 0
 
 CONTORNO_TEMPO_VIDA  = 3.0
 OCR_INTERVAL         = 0.7
@@ -315,7 +322,11 @@ def desenhar_interface(frame, estatisticas, agora):
             ("Valores",  str(stats['valores_detectados'])),
             ("QR Codes", str(stats['qrcodes_detectados'])),
             ("Taxa",     f"{stats['detectoes_por_minuto']:.1f}/min"),
-        ]
+
+            ("FPS",      f"{fps_atual:.1f}"),
+            ("OCR",      f"{tempo_ocr:.0f}ms"),
+            ("Regioes",  str(regioes_detectadas)),
+        ]       
 
         sy = 50
 
@@ -775,75 +786,89 @@ def processar_valores(frame, estat):
         return
 
     global ocr_rodando
+    global tempo_ocr
+    global regioes_detectadas
     ocr_rodando = True
+    inicio_ocr = time.time()
 
     try:
         regioes = detectar_regioes_texto(frame)
+
+        regioes_detectadas = len(regioes)
         for roi, (rx, ry, rw, rh) in regioes:
             small = cv2.resize(
-            roi,
-            RESIZE_OCR
+                roi,
+                RESIZE_OCR
             )
-        gray = cv2.cvtColor(
-            small,
-            cv2.COLOR_BGR2GRAY
-        )
-        res = reader.readtext(
-            gray,
-            detail=1,
-            paragraph=False,
-            batch_size=1,
-            width_ths=2.0,
-            height_ths=2.0
-        )
-        for (bbox, texto, conf) in res:
+
+            gray = cv2.cvtColor(
+                small,
+                cv2.COLOR_BGR2GRAY
+            )
+
+            res = reader.readtext(
+                gray,
+                detail=1,
+                paragraph=False,
+                batch_size=1,
+                width_ths=2.0,
+                height_ths=2.0
+            )
+
             for (bbox, texto, conf) in res:
+            
                 if conf > 0.7:
+                
                     val = filtrar_valor_monetario(texto)
-                if val:
 
-                    sx = 640 / RESIZE_OCR[0]
-                    sy = 480 / RESIZE_OCR[1]
+                    if val:
 
-                    tl = (
-                        int(bbox[0][0] * sx) + rx,
-                        int(bbox[0][1] * sy) + ry
-                    )
-                    br = (
-                        int(bbox[2][0] * sx) + rx,
-                        int(bbox[2][1] * sy) + ry
-                    )
-
-                    valor_visual = texto.replace("R$", "").strip()
-
-                    if idioma_atual == IDIOMAS['ES_CO']:
-                        texto_contorno = f"COL$ {valor_visual} pesos colombianos"
-                    else:
-                        texto_contorno = f"R$ {valor_visual} reais"
-
-                    # ── SEMPRE atualiza o contorno ──
-                    atualizar_ou_criar_contorno(
-                        tl,
-                        br,
-                        texto_contorno,
-                        'VALOR'
-                    )
-
-                    # ── fala só uma vez ──
-                    if evitar_repeticao(val) and pode_detectar(val):
-                    
-                        logger.info(f"Valor: {val} (conf {conf:.2f})")
-
-                        estat.registrar_deteccao('VALOR')
-
-                        falar_texto(val)
+                        sx = 640 / RESIZE_OCR[0]
+                        sy = 480 / RESIZE_OCR[1]
+    
+                        tl = (
+                            int(bbox[0][0] * sx) + rx,
+                            int(bbox[0][1] * sy) + ry
+                        )
+                        br = (
+                            int(bbox[2][0] * sx) + rx,
+                            int(bbox[2][1] * sy) + ry
+                        )
+    
+                        valor_visual = texto.replace("R$", "").strip()
+    
+                        if idioma_atual == IDIOMAS['ES_CO']:
+                            texto_contorno = f"COL$ {valor_visual} pesos colombianos"
+                        else:
+                            texto_contorno = f"R$ {valor_visual} reais"
+    
+                        # ── SEMPRE atualiza o contorno ──
+                        atualizar_ou_criar_contorno(
+                            tl,
+                            br,
+                            texto_contorno,
+                            'VALOR'
+                        )
+    
+                        # ── fala só uma vez ──
+                        if evitar_repeticao(val) and pode_detectar(val):
+                        
+                            logger.info(f"Valor: {val} (conf {conf:.2f})")
+    
+                            estat.registrar_deteccao('VALOR')
+    
+                            falar_texto(val)
 
     except Exception as e:
         logger.error(f"Erro OCR: {e}")
         estat.registrar_erro()
 
     finally:
-        ocr_rodando = False
+     tempo_ocr = (
+        time.time() - inicio_ocr
+    ) * 1000
+
+    ocr_rodando = False
 
 def loop_ocr(estat):
 
@@ -1130,6 +1155,16 @@ try:
             break
 
         frame_count += 1
+
+        if frame_count % 10 == 0:
+            agora_fps = time.time()
+
+            fps_atual = 10 / (
+                agora_fps - ultimo_fps_tempo
+            )
+
+            ultimo_fps_tempo = agora_fps
+        
         agora = time.time()
 
         atualizar_contornos()
