@@ -14,6 +14,7 @@ import tempfile
 from queue import Queue, Empty, Full
 global ultimo_fps_tempo
 global fps_atual
+import config
 
 # ── LOGGING ───────────────────────────────────────────────────
 logging.basicConfig(
@@ -38,7 +39,10 @@ progresso_loading = 0.0
 
 detector = cv2.QRCodeDetector()
 
-# ── VARIAVEIS DE CONTROLE ─────────────────────────────────────
+# ── VARIAVEIS DE CONTROLE (carregadas de config.py) ───────────
+LARGURA = config.LARGURA
+ALTURA  = config.ALTURA
+
 ultimo_tempo         = time.time()
 texto_anterior       = ""
 frame_count          = 0
@@ -51,10 +55,13 @@ ultimo_fps_tempo = time.time()
 tempo_ocr = 0
 regioes_detectadas = 0
 
-CONTORNO_TEMPO_VIDA  = 3.0
-OCR_INTERVAL         = 0.7
-SKIP_FRAMES          = 8
-RESIZE_OCR           = (320, 240)
+CONTORNO_TEMPO_VIDA  = config.CONTORNO_TEMPO_VIDA
+OCR_INTERVAL         = config.OCR_INTERVAL
+SKIP_FRAMES          = config.SKIP_FRAMES
+RESIZE_OCR           = config.RESIZE_OCR
+OCR_CONFIANCA_MINIMA = getattr(config, 'OCR_CONFIANCA_MINIMA', 0.7)
+
+fila_ocr = Queue(maxsize=getattr(config, 'OCR_QUEUE_SIZE', 1))
 
 fala_lock            = threading.Lock()
 ultima_fala          = ""
@@ -62,33 +69,13 @@ ultima_fala          = ""
 # 🔥 NOVO
 ocr_rodando = False
 
-fila_ocr = Queue(maxsize=1)
-
-MODOS = {'AUTO': 0, 'VALORES': 1, 'QRCODE': 2}
+MODOS = config.MODOS
 modo_atual = MODOS['AUTO']
 
-IDIOMAS = {
-    'PT_BR': 0,
-    'ES_CO': 1
-}
-
+IDIOMAS = config.IDIOMAS
 idioma_atual = IDIOMAS['PT_BR']
 
-# ── PALETA ────────────────────────────────────────────────────
-CORES = {
-    'BRANCO':       (255, 255, 255),
-    'PRETO':        (0,   0,   0),
-    'BG':           (0,  0,  0),
-    'CARD_BG':      (30,  35,  44),
-    'BORDA':        (48,  54,  64),
-    'TEXTO_SEC':    (130, 140, 160),
-    'TEXTO_PRIM':   (220, 225, 235),
-    'ACENTO':       (0,   200, 180),
-    'ACENTO_DIM':   (0,   60,  54),
-    'AMARELO':      (230, 180,   0),
-    'AZUL':         (80,  150, 255),
-    'VERDE_STATUS': (50,  200, 100),
-}
+CORES = config.CORES
 
 # ── FONTES ────────────────────────────────────────────────────
 def carregar_fontes():
@@ -160,8 +147,8 @@ def carregar_camera():
 
     cap = cv2.VideoCapture(0)
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, LARGURA)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, ALTURA)
     cap.set(cv2.CAP_PROP_FPS, 30)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
@@ -825,14 +812,14 @@ def processar_valores(frame, estat):
 
             for (bbox, texto, conf) in res:
             
-                if conf > 0.7:
+                if conf >= OCR_CONFIANCA_MINIMA:
                 
                     val = filtrar_valor_monetario(texto)
 
                     if val:
 
-                        sx = 640 / RESIZE_OCR[0]
-                        sy = 480 / RESIZE_OCR[1]
+                        sx = LARGURA / RESIZE_OCR[0]
+                        sy = ALTURA  / RESIZE_OCR[1]
     
                         tl = (
                             int(bbox[0][0] * sx) + rx,
@@ -950,8 +937,8 @@ def processar_qrcode(frame, estat):
 # ── INICIALIZACAO ─────────────────────────────────────────────
 estatisticas = Estatisticas()
 
-print("[INFO] Aponte a camera para o visor da maquininha ou QR Code...")
-logger.info("Sistema PayAI iniciado - 640x480")
+print(f"[INFO] Aponte a camera para o visor da maquininha ou QR Code...")
+logger.info(f"Sistema PayAI iniciado - {LARGURA}x{ALTURA}")
 
 # ── THREAD DE CARREGAMENTO OCR ───────────────────────────────
 threading.Thread(
@@ -978,7 +965,7 @@ try:
     # ── SPLASH SCREEN ───────────────────────────────────
         if not camera_pronta or not ocr_pronto:
 
-            splash = np.zeros((480, 640, 3), dtype=np.uint8)
+            splash = np.zeros((ALTURA, LARGURA, 3), dtype=np.uint8)
 
             splash[:] = CORES['BG']
 
@@ -989,7 +976,7 @@ try:
             texto_c(
                 draw,
                 "PAYAI",
-                320,
+                LARGURA // 2,
                 165,
                 FONTES['logo_pay'],
                 CORES['ACENTO']
@@ -998,7 +985,7 @@ try:
             texto_c(
                 draw,
                 "Inicializando sistema...",
-                320,
+                LARGURA // 2,
                 225,
                 FONTES['corpo_b'],
                 CORES['TEXTO_PRIM']
@@ -1051,7 +1038,7 @@ try:
             texto_c(
                 draw,
                 texto_status,
-                320,
+                LARGURA // 2,
                 255,
                 FONTES['pequena'],
                 CORES['TEXTO_SEC']
