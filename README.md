@@ -73,7 +73,7 @@ pip install -r requirements.txt
 Execute o sistema:
 
 ```bash
-python PayAI.py
+python main.py
 ```
 
 ---
@@ -97,11 +97,21 @@ python PayAI.py
 ```text
 fenecit/
 │
-├── PayAI.py
+├── main.py
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
 ├── config.json
+│
+├── payai/
+│   ├── __init__.py
+│   ├── camera.py
+│   ├── config.py
+│   ├── draw.py
+│   ├── logger.py
+│   ├── ocr.py
+│   ├── speech.py
+│   └── utils.py
 │
 ├── logs/
 ├── screenshots/

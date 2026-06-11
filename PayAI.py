@@ -9,24 +9,22 @@ import logging
 import threading
 import numpy as np
 from PIL import ImageFont, ImageDraw, Image
+from payai.camera import Camera
 import pygame
 import tempfile
 from queue import Queue, Empty, Full
-import config
+from payai.logger import logger
+from payai.config import *
+from payai.draw import carregar_fontes, FONTES, rect_r, texto_c, pil_para_cv2, cv2_para_pil
+from payai.ocr import carregar_ocr, OCRThread, reader, ocr_pronto
+from payai.speech import falar_texto
 
 global ultimo_fps_tempo
 global fps_atual
 
 # ── LOGGING ───────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('payai.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# logging agora gerenciado por payai.logger
+# logger importado do pacote payai
 
 # ── OCR / VOZ ─────────────────────────────────────────────────
 reader = None
@@ -41,14 +39,14 @@ progresso_loading = 0.0
 detector = cv2.QRCodeDetector()
 
 # ── VARIAVEIS DE CONTROLE (carregadas de config.py) ───────────
-LARGURA = config.LARGURA
-ALTURA  = config.ALTURA
+LARGURA = LARGURA
+ALTURA  = ALTURA
 
-OCR_INTERVAL         = config.OCR_INTERVAL
-SKIP_FRAMES          = config.SKIP_FRAMES
-RESIZE_OCR           = config.RESIZE_OCR
-OCR_CONFIANCA_MINIMA = config.OCR_CONFIANCA_MINIMA
-CONTORNO_TEMPO_VIDA  = config.CONTORNO_TEMPO_VIDA
+OCR_INTERVAL         = OCR_INTERVAL
+SKIP_FRAMES          = SKIP_FRAMES
+RESIZE_OCR           = RESIZE_OCR
+OCR_CONFIANCA_MINIMA = OCR_CONFIANCA_MINIMA
+CONTORNO_TEMPO_VIDA  = CONTORNO_TEMPO_VIDA
 
 ultimo_tempo         = time.time()
 texto_anterior       = ""
@@ -62,51 +60,48 @@ ultimo_fps_tempo = time.time()
 tempo_ocr = 0
 regioes_detectadas = 0
 
-fila_ocr = Queue(maxsize=config.OCR_QUEUE_SIZE)
+fila_ocr = Queue(maxsize=OCR_QUEUE_SIZE)
 
 fala_lock            = threading.Lock()
 ultima_fala          = ""
 
-# 🔥 NOVO
+# Estado OCR
 ocr_rodando = False
 
-MODOS = config.MODOS
 modo_atual = MODOS['AUTO']
-
-IDIOMAS = config.IDIOMAS
 idioma_atual = IDIOMAS['PT_BR']
-
-CORES = config.CORES
+# CORES, MODOS e IDIOMAS já são importados de payai.config
 
 # ── FONTES ────────────────────────────────────────────────────
-def carregar_fontes():
-    base = "C:/Windows/Fonts/"
-    try:
-        return {
-            'logo_pay':  ImageFont.truetype(base + "segoeuib.ttf", 20),
-            'logo_ai':   ImageFont.truetype(base + "segoeui.ttf",  20),
-            'subtitulo': ImageFont.truetype(base + "segoeui.ttf",  11),
-            'secao':     ImageFont.truetype(base + "segoeuib.ttf", 10),
-            'corpo':     ImageFont.truetype(base + "segoeui.ttf",  12),
-            'corpo_b':   ImageFont.truetype(base + "segoeuib.ttf", 12),
-            'pequena':   ImageFont.truetype(base + "segoeui.ttf",  10),
-            'badge':     ImageFont.truetype(base + "segoeuib.ttf", 11),
-            'modo':      ImageFont.truetype(base + "segoeuib.ttf", 12),
-            'contorno':  ImageFont.truetype(base + "segoeuib.ttf", 11),
-            'hotkey':    ImageFont.truetype(base + "segoeuib.ttf", 13),
-            'hotlabel':  ImageFont.truetype(base + "segoeui.ttf",  10),
-        }
-    except Exception as e:
-        logger.warning(f"Segoe UI nao encontrada: {e}")
-        f = ImageFont.load_default()
-        return {k: f for k in ['logo_pay','logo_ai','subtitulo','secao','corpo',
-                                'corpo_b','pequena','badge','modo','contorno',
-                                'hotkey','hotlabel']}
+# def carregar_fontes():
+#     base = "C:/Windows/Fonts/"
+#     try:
+#         return {
+#             'logo_pay':  ImageFont.truetype(base + "segoeuib.ttf", 20),
+#             'logo_ai':   ImageFont.truetype(base + "segoeui.ttf",  20),
+#             'subtitulo': ImageFont.truetype(base + "segoeui.ttf",  11),
+#             'secao':     ImageFont.truetype(base + "segoeuib.ttf", 10),
+#             'corpo':     ImageFont.truetype(base + "segoeui.ttf",  12),
+#             'corpo_b':   ImageFont.truetype(base + "segoeuib.ttf", 12),
+#             'pequena':   ImageFont.truetype(base + "segoeui.ttf",  10),
+#             'badge':     ImageFont.truetype(base + "segoeuib.ttf", 11),
+#             'modo':      ImageFont.truetype(base + "segoeuib.ttf", 12),
+#             'contorno':  ImageFont.truetype(base + "segoeuib.ttf", 11),
+#             'hotkey':    ImageFont.truetype(base + "segoeuib.ttf", 13),
+#             'hotlabel':  ImageFont.truetype(base + "segoeui.ttf",  10),
+#         }
+#     except Exception as e:
+#         logger.warning(f"Segoe UI nao encontrada: {e}")
+#         f = ImageFont.load_default()
+#         return {k: f for k in ['logo_pay','logo_ai','subtitulo','secao','corpo',
+#                                 'corpo_b','pequena','badge','modo','contorno',
+#                                 'hotkey','hotlabel']}
 
-FONTES = carregar_fontes()
+# FONTES = carregar_fontes()
 
 # ── UTILITARIOS DE DESENHO ────────────────────────────────────
 def cv2_para_pil(frame):
+    # compatibilidade com o módulo draw: converte BGR->RGB
     return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
 def pil_para_cv2(img):
@@ -139,29 +134,23 @@ def carregar_ocr():
         print(e)
 
 # ── CARREGAMENTO CAMERA ───────────────────────────────────────
-def carregar_camera():
+# A câmera será iniciada em thread para não bloquear a inicialização
+cap = None
+camera_pronta = False
 
-    global cap
-    global camera_pronta
-
+_camera = Camera()
+def _iniciar_camera():
+    global cap, camera_pronta
     logger.info("Inicializando camera...")
-
-    cap = cv2.VideoCapture(0)
-
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, LARGURA)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, ALTURA)
-    cap.set(cv2.CAP_PROP_FPS, 30)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-    if not cap.isOpened():
-
+    ok = _camera.start()
+    if ok:
+        cap = _camera.cap
+        camera_pronta = True
+        logger.info("Camera pronta.")
+    else:
         logger.error("Erro ao acessar camera.")
 
-        return
-
-    camera_pronta = True
-
-    logger.info("Camera pronta.")
+threading.Thread(target=_iniciar_camera, daemon=True).start()
 
 def rect_r(draw, x1, y1, x2, y2, r, fill=None, outline=None, width=1):
     if fill:
@@ -897,13 +886,11 @@ def processar_qrcode(frame, estat):
 
         return
 
-    if data and data.strip() and evitar_repeticao(f"QR_{data}"):
-
+    if data and data.strip():
+        # fallback behavior: log data and notify
         logger.info(f"QR: {data}")
-
         estat.registrar_deteccao('QRCODE')
-
-        falar_texto("QR Code detectado")
+        falar_texto("QR Code detectado", idioma_atual, None)
 
         if bbox is not None:
 
@@ -948,17 +935,26 @@ threading.Thread(
 ).start()
 
 # ── THREAD CAMERA ────────────────────────────────────────────
+# threading.Thread(
+#     target=carregar_camera,
+#     daemon=True
+# ).start()
+
+def _iniciar_camera_thread():
+    global cap, camera_pronta
+    ok = _camera.start()
+    if ok:
+        cap = _camera.cap
+        camera_pronta = True
+
 threading.Thread(
-    target=carregar_camera,
+    target=_iniciar_camera_thread,
     daemon=True
 ).start()
 
 # ── LOOP PRINCIPAL ────────────────────────────────────────────
-threading.Thread(
-    target=loop_ocr,
-    args=(estatisticas,),
-    daemon=True
-).start()
+_ocr_thread = OCRThread(fila_ocr, estatisticas)
+_ocr_thread.start()
 
 try:
     while True:
@@ -1167,7 +1163,6 @@ try:
 
         if modo_atual in (MODOS['AUTO'], MODOS['VALORES']):
             if (
-                not ocr_rodando and
                 agora - ultimo_processamento > OCR_INTERVAL and
                 frame_count % SKIP_FRAMES == 0
             ):
@@ -1190,34 +1185,50 @@ try:
             break
         elif key in (ord('v'), ord('V')):
             modo_atual = MODOS['VALORES']
-            falar_texto("Modo valores ativado")
+            falar_texto("Modo valores ativado", idioma_atual, None)
         elif key in (ord('q'), ord('Q')):
             modo_atual = MODOS['QRCODE']
-            falar_texto("Modo QR Code ativado")
+            falar_texto("Modo QR Code ativado", idioma_atual, None)
         elif key in (ord('a'), ord('A')):
             modo_atual = MODOS['AUTO']
-            falar_texto("Modo automatico ativado")
+            falar_texto("Modo automatico ativado", idioma_atual, None)
         elif key in (ord('i'), ord('I')):
             if idioma_atual == IDIOMAS['PT_BR']:
                 idioma_atual = IDIOMAS['ES_CO']
-                falar_texto('Idioma español activado')
+                falar_texto('Idioma español activado', idioma_atual, None)
             else:
                 idioma_atual = IDIOMAS['PT_BR']
-                falar_texto('Idioma portugues ativado')
+                falar_texto('Idioma portugues ativado', idioma_atual, None)
         elif key in (ord('s'), ord('S')):
             nome = f"screenshot_{time.strftime('%Y%m%d_%H%M%S')}.png"
             cv2.imwrite(nome, frame_final)
             logger.info(f"Screenshot: {nome}")
-            falar_texto("Screenshot salvo")
+            falar_texto("Screenshot salvo", idioma_atual, None)
         elif key in (ord('r'), ord('R')):
             if ultima_fala:
-                falar_texto(ultima_fala)
+                falar_texto(ultima_fala, idioma_atual, None)
 
 except Exception as e:
     logger.error(f"Erro critico: {e}")
 
 finally:
-    cap.release()
+    if cap:
+        try:
+            cap.release()
+        except Exception:
+            pass
+    else:
+        # se camera for gerenciada pela classe
+        try:
+            _camera.release()
+        except Exception:
+            pass
+
     cv2.destroyAllWindows()
     logger.info(f"Estatisticas finais: {estatisticas.obter_estatisticas()}")
     logger.info("Sistema PayAI finalizado")
+    # parar thread OCR
+    try:
+        _ocr_thread.stop()
+    except Exception:
+        pass
