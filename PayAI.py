@@ -12,9 +12,10 @@ from PIL import ImageFont, ImageDraw, Image
 import pygame
 import tempfile
 from queue import Queue, Empty, Full
+import config
+
 global ultimo_fps_tempo
 global fps_atual
-import config
 
 # ── LOGGING ───────────────────────────────────────────────────
 logging.basicConfig(
@@ -43,6 +44,12 @@ detector = cv2.QRCodeDetector()
 LARGURA = config.LARGURA
 ALTURA  = config.ALTURA
 
+OCR_INTERVAL         = config.OCR_INTERVAL
+SKIP_FRAMES          = config.SKIP_FRAMES
+RESIZE_OCR           = config.RESIZE_OCR
+OCR_CONFIANCA_MINIMA = config.OCR_CONFIANCA_MINIMA
+CONTORNO_TEMPO_VIDA  = config.CONTORNO_TEMPO_VIDA
+
 ultimo_tempo         = time.time()
 texto_anterior       = ""
 frame_count          = 0
@@ -55,13 +62,7 @@ ultimo_fps_tempo = time.time()
 tempo_ocr = 0
 regioes_detectadas = 0
 
-CONTORNO_TEMPO_VIDA  = config.CONTORNO_TEMPO_VIDA
-OCR_INTERVAL         = config.OCR_INTERVAL
-SKIP_FRAMES          = config.SKIP_FRAMES
-RESIZE_OCR           = config.RESIZE_OCR
-OCR_CONFIANCA_MINIMA = getattr(config, 'OCR_CONFIANCA_MINIMA', 0.7)
-
-fila_ocr = Queue(maxsize=getattr(config, 'OCR_QUEUE_SIZE', 1))
+fila_ocr = Queue(maxsize=config.OCR_QUEUE_SIZE)
 
 fala_lock            = threading.Lock()
 ultima_fala          = ""
@@ -859,9 +860,9 @@ def processar_valores(frame, estat):
         estat.registrar_erro()
 
     finally:
-     tempo_ocr = (
-        time.time() - inicio_ocr
-    ) * 1000
+        tempo_ocr = (
+            time.time() - inicio_ocr
+        ) * 1000
 
     ocr_rodando = False
 
