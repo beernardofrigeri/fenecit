@@ -9,22 +9,58 @@ import logging
 import threading
 import numpy as np
 from PIL import ImageFont, ImageDraw, Image
-from payai.camera import Camera
 import pygame
 import tempfile
 from queue import Queue, Empty, Full
-from payai.logger import logger
-from payai.config import *
-from payai.draw import carregar_fontes, FONTES, rect_r, texto_c, pil_para_cv2, cv2_para_pil
-from payai.ocr import carregar_ocr, OCRThread, reader, ocr_pronto
-from payai.speech import falar_texto
 
-global ultimo_fps_tempo
-global fps_atual
+# ── CONFIGURAÇÃO ──────────────────────────────────────────────
+LARGURA = 640
+ALTURA = 480
+
+OCR_INTERVAL = 0.7
+SKIP_FRAMES = 8
+RESIZE_OCR = (320, 240)
+OCR_CONFIANCA_MINIMA = 0.7
+CONTORNO_TEMPO_VIDA = 3.0
+OCR_QUEUE_SIZE = 1
+
+MODOS = {
+    'AUTO': 0,
+    'VALORES': 1,
+    'QRCODE': 2
+}
+
+IDIOMAS = {
+    'PT_BR': 0,
+    'ES_CO': 1
+}
+
+CORES = {
+    'BRANCO':       (255, 255, 255),
+    'PRETO':        (0,   0,   0),
+    'BG':           (0,  0,  0),
+    'CARD_BG':      (30,  35,  44),
+    'BORDA':        (48,  54,  64),
+    'TEXTO_SEC':    (130, 140, 160),
+    'TEXTO_PRIM':   (220, 225, 235),
+    'ACENTO':       (0,   200, 180),
+    'ACENTO_DIM':   (0,   60,  54),
+    'AMARELO':      (230, 180,   0),
+    'AZUL':         (80,  150, 255),
+    'VERDE_STATUS': (50,  200, 100),
+}
 
 # ── LOGGING ───────────────────────────────────────────────────
-# logging agora gerenciado por payai.logger
-# logger importado do pacote payai
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('payai.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger('payai')
 
 # ── OCR / VOZ ─────────────────────────────────────────────────
 reader = None
@@ -34,19 +70,71 @@ ocr_pronto = False
 cap = None
 camera_pronta = False
 
+class Camera:
+    def __init__(self, device=0, width=LARGURA, height=ALTURA, fps=30):
+        self.device = device
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.cap = None
+
+    def start(self):
+        logger.info("Inicializando camera...")
+        self.cap = cv2.VideoCapture(self.device)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+        try:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+
+        if not self.cap.isOpened():
+            logger.error("Erro ao acessar camera.")
+            return False
+
+        logger.info("Camera pronta.")
+        return True
+
+    def read(self):
+        if not self.cap:
+            return False, None
+        return self.cap.read()
+
+    def release(self):
+        if self.cap:
+            self.cap.release()
+
+
+def carregar_fontes():
+    base = "C:/Windows/Fonts/"
+    try:
+        return {
+            'logo_pay':  ImageFont.truetype(base + "segoeuib.ttf", 20),
+            'logo_ai':   ImageFont.truetype(base + "segoeui.ttf",  20),
+            'subtitulo': ImageFont.truetype(base + "segoeui.ttf",  11),
+            'secao':     ImageFont.truetype(base + "segoeuib.ttf", 10),
+            'corpo':     ImageFont.truetype(base + "segoeui.ttf",  12),
+            'corpo_b':   ImageFont.truetype(base + "segoeuib.ttf", 12),
+            'pequena':   ImageFont.truetype(base + "segoeui.ttf",  10),
+            'badge':     ImageFont.truetype(base + "segoeuib.ttf", 11),
+            'modo':      ImageFont.truetype(base + "segoeuib.ttf", 12),
+            'contorno':  ImageFont.truetype(base + "segoeuib.ttf", 11),
+            'hotkey':    ImageFont.truetype(base + "segoeuib.ttf", 13),
+            'hotlabel':  ImageFont.truetype(base + "segoeui.ttf",  10),
+        }
+    except Exception as e:
+        logger.warning(f"Segoe UI nao encontrada: {e}")
+        f = ImageFont.load_default()
+        return {k: f for k in ['logo_pay','logo_ai','subtitulo','secao','corpo',
+                                'corpo_b','pequena','badge','modo','contorno',
+                                'hotkey','hotlabel']}
+
+FONTES = carregar_fontes()
+
 progresso_loading = 0.0
 
 detector = cv2.QRCodeDetector()
-
-# ── VARIAVEIS DE CONTROLE (carregadas de config.py) ───────────
-LARGURA = LARGURA
-ALTURA  = ALTURA
-
-OCR_INTERVAL         = OCR_INTERVAL
-SKIP_FRAMES          = SKIP_FRAMES
-RESIZE_OCR           = RESIZE_OCR
-OCR_CONFIANCA_MINIMA = OCR_CONFIANCA_MINIMA
-CONTORNO_TEMPO_VIDA  = CONTORNO_TEMPO_VIDA
 
 ultimo_tempo         = time.time()
 texto_anterior       = ""
@@ -132,6 +220,28 @@ def carregar_ocr():
         logger.error(f"Erro carregando OCR: {e}")
 
         print(e)
+
+
+class OCRThread(threading.Thread):
+    def __init__(self, fila, estat):
+        super().__init__(daemon=True)
+        self.fila = fila
+        self.estat = estat
+        self._stop = False
+
+    def run(self):
+        while not self._stop:
+            try:
+                frame = self.fila.get(timeout=0.1)
+                processar_valores(frame, self.estat)
+            except Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Erro loop OCR: {e}")
+
+    def stop(self):
+        self._stop = True
+
 
 # ── CARREGAMENTO CAMERA ───────────────────────────────────────
 # A câmera será iniciada em thread para não bloquear a inicialização
@@ -535,10 +645,13 @@ async def falar_edge(texto, voz="es-CO-GonzaloNeural"):
 
     os.remove(caminho)
 
-def falar_texto(texto):
+def falar_texto(texto, idioma=None, ultima_fala_ref=None):
 
     global ultima_fala
     ultima_fala = texto
+
+    if idioma is None:
+        idioma = idioma_atual
 
     def _falar():
 
@@ -552,7 +665,7 @@ def falar_texto(texto):
                 mc = re.search(r'(\d+)\s*centavos', texto.lower())
 
                 # ── PORTUGUES ─────────────────────
-                if idioma_atual == IDIOMAS['PT_BR']:
+                if idioma == IDIOMAS['PT_BR']:
 
                     if mr:
                         n = int(mr.group(1))
@@ -565,7 +678,7 @@ def falar_texto(texto):
                         tf = f"{_num_pt(int(mc.group(1)))} centavos"
 
                 # ── ESPANHOL ──────────────────────
-                elif idioma_atual == IDIOMAS['ES_CO']:
+                elif idioma == IDIOMAS['ES_CO']:
 
                     if mr:
                         n = int(mr.group(1))
@@ -599,7 +712,7 @@ def falar_texto(texto):
                         'Captura guardada'
                     )
 
-                if idioma_atual == IDIOMAS['ES_CO']:
+                if idioma == IDIOMAS['ES_CO']:
                     asyncio.run(
                         falar_edge(
                             tf,
@@ -623,22 +736,32 @@ def falar_texto(texto):
 # ── FILTRO MONETARIO ──────────────────────────────────────────
 def validar_valor(val):
     try:
+        val = val.strip()
         p = val.split(',')
-        if len(p) != 2: 
+        if len(p) != 2:
             return False
-        i, d = p[0].replace('.', ''), p[1]
-        if len(d) != 2 or not d.isdigit() or not i.isdigit(): 
+        i = p[0].replace('.', '').strip()
+        d = p[1].strip()
+        if len(d) != 2 or not d.isdigit() or not i.isdigit():
             return False
         return 0 <= float(f"{i}.{d}") <= 10000
     except Exception:
         return False
 
-def formatar_fala(val):
-    p    = val.split(',')
-    i, c = int(p[0].replace('.', '')), int(p[1])
-    if c == 0: 
+def formatar_fala(val, idioma=IDIOMAS['PT_BR']):
+    p = val.strip().split(',')
+    i = int(p[0].replace('.', '').strip())
+    c = int(p[1].strip())
+    if idioma == IDIOMAS['ES_CO']:
+        if c == 0:
+            return f"{i} pesos colombianos"
+        if i == 0:
+            return f"{c} centavos"
+        return f"{i} pesos colombianos e {c} centavos"
+
+    if c == 0:
         return f"{i} reais"
-    if i == 0: 
+    if i == 0:
         return f"{c} centavos"
     return f"{i} reais e {c} centavos"
 
@@ -652,11 +775,13 @@ def filtrar_valor_monetario(texto):
         r'(\d{1,3}(?:\.\d{3})*,\d{2})',
         r'(\d+,\d{2})',
     ]
+    candidatos = []
     for p in padroes:
-        m = re.search(p, texto, re.IGNORECASE)
-        if m and validar_valor(m.group(1)):
-            return formatar_fala(m.group(1))
-    return None
+        for m in re.finditer(p, texto, re.IGNORECASE):
+            valor = m.group(1).strip()
+            if validar_valor(valor):
+                candidatos.append(valor)
+    return candidatos[-1] if candidatos else None
 
 def evitar_repeticao(texto, minimo=3):
     global ultimo_tempo, texto_anterior
@@ -747,6 +872,10 @@ def detectar_regioes_texto(frame):
 
         x, y, w, h = cv2.boundingRect(cnt)
 
+        # ignora texto da interface no topo da janela
+        if y < 60:
+            continue
+
         # filtros contra lixo
         if w < 60 or h < 20:
             continue
@@ -764,6 +893,49 @@ def detectar_regioes_texto(frame):
         regioes.append((roi, (x, y, w, h)))
 
     return regioes
+
+
+def buscar_valor_global(frame):
+    if reader is None:
+        return None
+
+    small = cv2.resize(frame, RESIZE_OCR)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+
+    deteccoes = reader.readtext(
+        gray,
+        detail=1,
+        paragraph=False,
+        batch_size=1,
+        width_ths=2.0,
+        height_ths=2.0
+    )
+
+    candidatos = []
+
+    for bbox, texto, conf in deteccoes:
+        valor = filtrar_valor_monetario(texto)
+        if not valor:
+            continue
+
+        # evita valores do cabeçalho da interface
+        y_center = sum([p[1] for p in bbox]) / len(bbox)
+        if y_center < 80:
+            continue
+
+        area = (
+            abs(bbox[2][0] - bbox[0][0]) *
+            abs(bbox[2][1] - bbox[0][1])
+        )
+
+        candidatos.append((conf, area, valor, bbox))
+
+    if not candidatos:
+        return None
+
+    candidatos.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    _, _, valor, bbox = candidatos[0]
+    return valor, bbox
 
 def processar_valores(frame, estat):
     
@@ -820,13 +992,11 @@ def processar_valores(frame, estat):
                             int(bbox[2][1] * sy) + ry
                         )
     
-                        valor_visual = texto.replace("R$", "").strip()
-    
                         if idioma_atual == IDIOMAS['ES_CO']:
-                            texto_contorno = f"COL$ {valor_visual} pesos colombianos"
+                            texto_contorno = f"COL$ {val} pesos colombianos"
                         else:
-                            texto_contorno = f"R$ {valor_visual} reais"
-    
+                            texto_contorno = f"R$ {val} reais"
+
                         # ── SEMPRE atualiza o contorno ──
                         atualizar_ou_criar_contorno(
                             tl,
@@ -834,15 +1004,14 @@ def processar_valores(frame, estat):
                             texto_contorno,
                             'VALOR'
                         )
-    
-                        # ── fala só uma vez ──
-                        if evitar_repeticao(val) and pode_detectar(val):
-                        
-                            logger.info(f"Valor: {val} (conf {conf:.2f})")
-    
+
+                        val_fala = formatar_fala(val, idioma_atual)
+
+                        # ── fala e log só uma vez ──
+                        if evitar_repeticao(val_fala) and pode_detectar(val_fala):
+                            logger.info(f"Valor: {val_fala} (conf {conf:.2f})")
                             estat.registrar_deteccao('VALOR')
-    
-                            falar_texto(val)
+                            falar_texto(val_fala, idioma_atual, None)
 
     except Exception as e:
         logger.error(f"Erro OCR: {e}")
@@ -852,8 +1021,8 @@ def processar_valores(frame, estat):
         tempo_ocr = (
             time.time() - inicio_ocr
         ) * 1000
+        ocr_rodando = False
 
-    ocr_rodando = False
 
 def loop_ocr(estat):
 
@@ -887,6 +1056,9 @@ def processar_qrcode(frame, estat):
         return
 
     if data and data.strip():
+        if not pode_detectar(data):
+            return
+
         # fallback behavior: log data and notify
         logger.info(f"QR: {data}")
         estat.registrar_deteccao('QRCODE')
