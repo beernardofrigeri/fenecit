@@ -20,9 +20,10 @@ ALTURA = 480
 OCR_INTERVAL = 0.7
 SKIP_FRAMES = 8
 RESIZE_OCR = (320, 240)
-OCR_CONFIANCA_MINIMA = 0.7
+OCR_CONFIANCA_MINIMA = 0.85
 CONTORNO_TEMPO_VIDA = 3.0
 OCR_QUEUE_SIZE = 1
+VALOR_HISTORY_BUFFER = 5
 
 MODOS = {
     'AUTO': 0,
@@ -152,6 +153,7 @@ fila_ocr = Queue(maxsize=OCR_QUEUE_SIZE)
 
 fala_lock            = threading.Lock()
 ultima_fala          = ""
+valor_history        = []
 
 # Estado OCR
 ocr_rodando = False
@@ -744,7 +746,17 @@ def validar_valor(val):
         d = p[1].strip()
         if len(d) != 2 or not d.isdigit() or not i.isdigit():
             return False
-        return 0 <= float(f"{i}.{d}") <= 10000
+        
+        # Rejeita se o inteiro estiver vazio
+        if not i or i == '0':
+            return False
+        
+        # Rejeita se tiver apenas um dígito no inteiro (muito provável ser fragmento)
+        if len(i) == 1 and i in '123456789':
+            return False
+        
+        valor_float = float(f"{i}.{d}")
+        return 0.01 <= valor_float <= 10000
     except Exception:
         return False
 
@@ -765,38 +777,75 @@ def formatar_fala(val, idioma=IDIOMAS['PT_BR']):
         return f"{c} centavos"
     return f"{i} reais e {c} centavos"
 
-def filtrar_valor_monetario(texto):
-    padroes = [
-        r'R\s*[\$\s]*\s*(\d{1,3}(?:\.\d{3})*,\d{2})',
-        r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*R',
-        r'valor\s*[\:\s]*\s*(\d{1,3}(?:\.\d{3})*,\d{2})',
-        r'total\s*[\:\s]*\s*(\d{1,3}(?:\.\d{3})*,\d{2})',
-        r'(\d+,\d{2})\s*(?:reais|R\$)',
-        r'(\d{1,3}(?:\.\d{3})*,\d{2})',
-        r'(\d+,\d{2})',
-    ]
-    candidatos = []
-    for p in padroes:
-        for m in re.finditer(p, texto, re.IGNORECASE):
-            valor = m.group(1).strip()
-            if validar_valor(valor):
-                candidatos.append(valor)
-    return candidatos[-1] if candidatos else None
+def _valor_numero(valor):
+    try:
+        valor_limpo = valor.replace('.', '').replace(',', '.')
+        return float(valor_limpo)
+    except Exception:
+        return -1.0
 
-def evitar_repeticao(texto, minimo=3):
-    global ultimo_tempo, texto_anterior
+
+def _valor_tem_formato_completo(valor):
+    """Verifica se o valor tem um formato que sugira ser completo, não fragmentário."""
+    # Se tem 'R$' ou 'reais', é muito provável ser completo
+    return 'R$' in valor or 'reais' in valor or len(valor) > 7
+
+
+def filtrar_valor_monetario(texto):
+    if not texto:
+        return None
+
+    # Padrões em ordem de prioridade (mais específicos primeiro)
+    padroes_prioritarios = [
+        (r'R\s*[\$\s]*\s*(\d{1,3}(?:\.\d{3})*,\d{2})', 'com_simbolo'),
+        (r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*R\$?', 'com_simbolo_direita'),
+    ]
+    
+    padroes_secundarios = [
+        (r'valor\s*[:\s]+\s*(\d{1,3}(?:\.\d{3})*,\d{2})', 'com_label'),
+        (r'total\s*[:\s]+\s*(\d{1,3}(?:\.\d{3})*,\d{2})', 'com_label'),
+        (r'(\d+,\d{2})\s*(?:reais|R\$)', 'com_palavra'),
+    ]
+    
+    padroes_generico = [
+        (r'(\d{1,3}(?:\.\d{3})*,\d{2})', 'generico_completo'),
+        (r'(\d+,\d{2})', 'generico_simples'),
+    ]
+
+    # Tenta padrões prioritários primeiro
+    for padroes, categoria in [(padroes_prioritarios, 'prioritario'), 
+                                 (padroes_secundarios, 'secundario'), 
+                                 (padroes_generico, 'generico')]:
+        for pattern, pattern_type in padroes:
+            for m in re.finditer(pattern, texto, re.IGNORECASE):
+                valor = m.group(1).strip()
+                if validar_valor(valor):
+                    return valor
+
+    return None
+
+def evitar_repeticao(texto, minimo=5):
+    global ultimo_tempo, texto_anterior, valor_history
     agora = time.time()
-    if texto == texto_anterior and (agora - ultimo_tempo) < minimo:
-        return False
+    
+    # Verifica histórico recente (últimos 5 valores)
+    valor_history.append((texto, agora))
+    if len(valor_history) > VALOR_HISTORY_BUFFER:
+        valor_history.pop(0)
+    
+    # Se o mesmo texto foi detecado nos últimos 'minimo' segundos, ignora
+    for hist_texto, hist_tempo in valor_history[:-1]:
+        if hist_texto == texto and (agora - hist_tempo) < minimo:
+            return False
+    
     texto_anterior, ultimo_tempo = texto, agora
     return True
 
-def pode_detectar(texto, cooldown=5):
-
+def pode_detectar(texto, cooldown=8):
+    """Verifica se o texto pode ser detectado novamente (com cooldown)."""
     agora = time.time()
 
     if texto in ultimos_detectados:
-
         if agora - ultimos_detectados[texto] < cooldown:
             return False
 
@@ -938,7 +987,6 @@ def buscar_valor_global(frame):
     return valor, bbox
 
 def processar_valores(frame, estat):
-    
     if reader is None:
         return
 
@@ -950,68 +998,77 @@ def processar_valores(frame, estat):
 
     try:
         regioes = detectar_regioes_texto(frame)
-
         regioes_detectadas = len(regioes)
-        for roi, (rx, ry, rw, rh) in regioes:
-            small = cv2.resize(
-                roi,
-                RESIZE_OCR
-            )
 
-            gray = cv2.cvtColor(
-                small,
-                cv2.COLOR_BGR2GRAY
-            )
+        candidatos_frame = []
+
+        for roi, (rx, ry, rw, rh) in regioes:
+            if rw <= 0 or rh <= 0:
+                continue
+
+            small = cv2.resize(roi, RESIZE_OCR)
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (5, 5), 0)
+            _, gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
             res = reader.readtext(
                 gray,
                 detail=1,
                 paragraph=False,
                 batch_size=1,
-                width_ths=2.0,
-                height_ths=2.0
+                width_ths=2.5,
+                height_ths=2.5,
+                allowlist='0123456789R$,.reais',
+                mag_ratio=2.0,
             )
 
             for (bbox, texto, conf) in res:
-            
-                if conf >= OCR_CONFIANCA_MINIMA:
-                
-                    val = filtrar_valor_monetario(texto)
+                if conf < OCR_CONFIANCA_MINIMA:
+                    continue
 
-                    if val:
+                val = filtrar_valor_monetario(texto)
+                if not val:
+                    continue
 
-                        sx = LARGURA / RESIZE_OCR[0]
-                        sy = ALTURA  / RESIZE_OCR[1]
-    
-                        tl = (
-                            int(bbox[0][0] * sx) + rx,
-                            int(bbox[0][1] * sy) + ry
-                        )
-                        br = (
-                            int(bbox[2][0] * sx) + rx,
-                            int(bbox[2][1] * sy) + ry
-                        )
-    
-                        if idioma_atual == IDIOMAS['ES_CO']:
-                            texto_contorno = f"COL$ {val} pesos colombianos"
-                        else:
-                            texto_contorno = f"R$ {val} reais"
+                sx = rw / RESIZE_OCR[0]
+                sy = rh / RESIZE_OCR[1]
 
-                        # ── SEMPRE atualiza o contorno ──
-                        atualizar_ou_criar_contorno(
-                            tl,
-                            br,
-                            texto_contorno,
-                            'VALOR'
-                        )
+                tl = (
+                    int(bbox[0][0] * sx) + rx,
+                    int(bbox[0][1] * sy) + ry
+                )
+                br = (
+                    int(bbox[2][0] * sx) + rx,
+                    int(bbox[2][1] * sy) + ry
+                )
 
-                        val_fala = formatar_fala(val, idioma_atual)
+                # Prioriza candidatos com formato mais completo
+                prioridade = 2 if _valor_tem_formato_completo(texto) else 1
+                candidatos_frame.append((prioridade, conf, _valor_numero(val), val, tl, br))
 
-                        # ── fala e log só uma vez ──
-                        if evitar_repeticao(val_fala) and pode_detectar(val_fala):
-                            logger.info(f"Valor: {val_fala} (conf {conf:.2f})")
-                            estat.registrar_deteccao('VALOR')
-                            falar_texto(val_fala, idioma_atual, None)
+        if candidatos_frame:
+            # Ordena por: prioridade (desc), confiança (desc), valor numérico (desc)
+            candidatos_frame.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+            _, _, _, val, tl, br = candidatos_frame[0]
+
+            if idioma_atual == IDIOMAS['ES_CO']:
+                texto_contorno = f"COL$ {val} pesos colombianos"
+            else:
+                texto_contorno = f"R$ {val} reais"
+
+            atualizar_ou_criar_contorno(
+                tl,
+                br,
+                texto_contorno,
+                'VALOR'
+            )
+
+            val_fala = formatar_fala(val, idioma_atual)
+
+            if evitar_repeticao(val_fala) and pode_detectar(val_fala):
+                logger.info(f"Valor: {val_fala} (conf {candidatos_frame[0][1]:.2f})")
+                estat.registrar_deteccao('VALOR')
+                falar_texto(val_fala, idioma_atual, None)
 
     except Exception as e:
         logger.error(f"Erro OCR: {e}")
